@@ -8,6 +8,8 @@ final class Scenery {
     static final float[] FOG = {0.76f, 0.85f, 0.93f};
 
     Mesh sky, terrain, water, props, island, islandProps, buoyRed, buoyYellow, marker;
+    Mesh foliage, islandFoliage;   // alpha-tested cards (trees near the lake, grass, reeds)
+    private MeshBuilder foliageB, islandFoliageB;
     Mesh[][] boats;     // [hull][color]
     Mesh[] figures;     // RC drivers, one per color
 
@@ -15,12 +17,17 @@ final class Scenery {
         sky = buildSky();
         terrain = buildTerrain();
         water = buildWater();
+        foliageB = new MeshBuilder();
+        islandFoliageB = new MeshBuilder();
         props = buildProps(game);
         buoyRed = buildBuoy(0.95f, 0.18f, 0.12f);
         buoyYellow = buildBuoy(1.0f, 0.78f, 0.08f);
         marker = buildMarker();
         island = buildIsland();
         islandProps = buildIslandProps();
+        foliage = foliageB.build();
+        islandFoliage = islandFoliageB.build();
+        foliageB = islandFoliageB = null;
         boats = new Mesh[Boat.HULL_NAMES.length][Game.COLORS.length];
         figures = new Mesh[Game.COLORS.length];
         for (int i = 0; i < Game.COLORS.length; i++) {
@@ -179,9 +186,12 @@ final class Scenery {
             if (h < 1.0f || h > 22f) continue;
             if (World.lakeQ(x, z) < 1.1f) continue;
             if (Math.abs(x) < 12f && z > shoreZ - 4f && z < shoreZ + 20f) continue;
-            tree(mb, rnd, x, h, z, 0.8f + rnd.nextFloat() * 0.9f);
+            float sz = 0.8f + rnd.nextFloat() * 0.9f;
+            if (World.lakeQ(x, z) < 1.9f) nearTree(mb, foliageB, rnd, x, h, z, sz);
+            else tree(mb, rnd, x, h, z, sz);
             placed++;
         }
+        shorePlants(foliageB, rnd, game);
 
         // rocks along the shore
         for (int i = 0; i < 40; i++) {
@@ -297,7 +307,7 @@ final class Scenery {
         float[][] islandTrees = {{-7, -3}, {-9, 0}, {6, -4}, {8, 0}, {-3, 2}, {4, 2.5f}, {-12, -2}, {11, -1}};
         for (float[] t : islandTrees) {
             float h = World.height(t[0], t[1], true);
-            if (h > 0.3f) tree(mb, rnd, t[0], h, t[1], 0.6f + rnd.nextFloat() * 0.4f);
+            if (h > 0.3f) nearTree(mb, islandFoliageB, rnd, t[0], h, t[1], 0.6f + rnd.nextFloat() * 0.4f);
         }
         // lighthouse
         float lx = World.ISLAND_X, lz = World.ISLAND_Z;
@@ -367,6 +377,166 @@ final class Scenery {
         mb.box(0, 1.12f, -0.43f, 0.26f, 0.15f, 0.09f, 0, 0.12f, 0.12f, 0.14f);
         mb.box(0.08f, 1.36f, -0.46f, 0.015f, 0.42f, 0.015f, 0, 0.8f, 0.8f, 0.82f);
         return mb.build();
+    }
+
+    /** A tree near the lake: solid trunk and dark inner core, textured branch / leaf cards outside. */
+    private static void nearTree(MeshBuilder solid, MeshBuilder fol, Random rnd, float x, float h, float z, float s) {
+        float bark = 0.85f + rnd.nextFloat() * 0.3f;
+        int seed = rnd.nextInt();
+        if (rnd.nextFloat() < 0.62f) {
+            s *= 1.1f + rnd.nextFloat() * 0.25f;
+            float H = 6.6f * s, y0 = h + 0.7f * s, R = 1.9f * s;
+            solid.cylinder(x, h - 0.2f, z, 0.2f * s, 0.06f * s, H + 0.3f, 6, 0.33f * bark, 0.23f * bark, 0.15f * bark, false);
+            solid.foliageCone(x, y0 + 0.3f * s, z, R * 0.55f, H * 0.82f, 8, seed, 0.035f, 0.08f, 0.04f);
+            int tiers = 10;
+            float spin = rnd.nextFloat() * 6.28f;
+            for (int k = 0; k < tiers; k++) {
+                float f = (float) k / tiers;
+                float yk = y0 + (H - 0.7f * s) * f;
+                float rk = R * (float) Math.pow(1 - f, 0.9) + 0.25f * s;
+                int nb = k < tiers - 2 ? 7 : 5;
+                for (int j = 0; j < nb; j++) {
+                    float a = spin + k * 2.4f + j * 6.2832f / nb + (rnd.nextFloat() - 0.5f) * 0.4f;
+                    float ca = (float) Math.cos(a), sa = (float) Math.sin(a);
+                    float len = rk * (0.85f + rnd.nextFloat() * 0.3f);
+                    float droop = len * (0.25f + rnd.nextFloat() * 0.2f);
+                    float w = Math.max(0.45f * s, len * 0.6f) * 0.5f;
+                    float[] base = {x, yk + 0.1f * s, z};
+                    float[] tip = {x + ca * len, yk - droop, z + sa * len};
+                    float bright = 0.85f + rnd.nextFloat() * 0.35f;
+                    float[] flex = {0f, 0.45f, 0.45f, 0f};
+                    // two sprays rolled about the branch axis (a shallow V), not flat fins
+                    for (int roll = 0; roll < 2; roll++) {
+                        float ang = roll == 0 ? 0.5f : -0.6f;
+                        float cy = (float) Math.cos(ang), sy = (float) Math.sin(ang);
+                        float wx = -sa * w * cy, wy = w * sy, wz = ca * w * cy;   // width axis rolled up/down
+                        fol.card(new float[]{base[0] + wx * 0.3f, base[1] + wy * 0.3f, base[2] + wz * 0.3f},
+                                new float[]{tip[0] + wx, tip[1] + wy, tip[2] + wz},
+                                new float[]{tip[0] - wx, tip[1] - wy, tip[2] - wz},
+                                new float[]{base[0] - wx * 0.3f, base[1] - wy * 0.3f, base[2] - wz * 0.3f},
+                                MeshBuilder.CONIFER, x, yk - 0.4f * s, z, 0.6f, bright * (roll == 0 ? 1f : 0.9f), flex);
+                    }
+                }
+            }
+            // leader at the top
+            float top = y0 + H - 0.4f * s;
+            for (int j = 0; j < 2; j++) {
+                float a = j * 1.5708f, ca = (float) Math.cos(a) * 0.35f * s, sa = (float) Math.sin(a) * 0.35f * s;
+                fol.card(new float[]{x - ca * 0.7f, top + 0.6f * s, z - sa * 0.7f}, new float[]{x - ca * 0.7f, top - 0.5f * s, z - sa * 0.7f},
+                        new float[]{x + ca * 0.7f, top - 0.5f * s, z + sa * 0.7f}, new float[]{x + ca * 0.7f, top + 0.6f * s, z + sa * 0.7f},
+                        new float[]{0.496f, 0.004f, 0.004f, 0.496f}, x, top - 1f, z, 0.5f, 0.7f,
+                        new float[]{0.5f, 0.2f, 0.2f, 0.5f});
+            }
+        } else {
+            float g = 0.85f + rnd.nextFloat() * 0.3f;
+            solid.cylinder(x, h - 0.2f, z, 0.24f * s, 0.14f * s, 2.6f * s, 6, 0.36f * bark, 0.27f * bark, 0.18f * bark, false);
+            float[][] blobs = {
+                    {0, 2.7f, 0, 1.8f, 1.45f, 34},
+                    {0.8f, 3.4f, -0.3f, 1.2f, 1.05f, 18},
+                    {-0.7f, 3.2f, 0.5f, 1.15f, 1.0f, 16}};
+            for (int bI = 0; bI < blobs.length; bI++) {
+                float[] bl = blobs[bI];
+                float bx = x + bl[0] * s, by = h + bl[1] * s, bz = z + bl[2] * s;
+                float rr = bl[3] * s, ry = bl[4] * s;
+                solid.lumpySphere(bx, by, bz, rr * 0.72f, ry * 0.72f, rr * 0.72f, 8, 5, seed + bI,
+                        0.05f * g, 0.11f * g, 0.035f * g);
+                int cards = (int) bl[5];
+                for (int k = 0; k < cards; k++) {
+                    // a point on/near the canopy surface and a card facing outwards
+                    double th = Math.acos(1 - 2 * rnd.nextDouble() * 0.85), ph = rnd.nextDouble() * Math.PI * 2;
+                    float nx = (float) (Math.sin(th) * Math.cos(ph)), ny = (float) Math.cos(th), nz = (float) (Math.sin(th) * Math.sin(ph));
+                    float d = 0.7f + rnd.nextFloat() * 0.3f;
+                    float px = bx + nx * rr * d, py = by + ny * ry * d, pz = bz + nz * rr * d;
+                    // tangent axes
+                    float tx = -nz, tz = nx, tl = (float) Math.sqrt(tx * tx + tz * tz);
+                    if (tl < 1e-3f) { tx = 1; tz = 0; tl = 1; }
+                    tx /= tl; tz /= tl;
+                    float bxv = ny * tz, byv = nz * tx - nx * tz, bzv = -ny * tx;   // n x t
+                    float half = (0.75f + rnd.nextFloat() * 0.45f) * s;
+                    float rot = rnd.nextFloat() * 6.28f, cr = (float) Math.cos(rot), sr = (float) Math.sin(rot);
+                    float ux = tx * cr + bxv * sr, uy = byv * sr, uz = tz * cr + bzv * sr;
+                    float vx = -tx * sr + bxv * cr, vy = byv * cr, vz = -tz * sr + bzv * cr;
+                    float[][] c = new float[4][];
+                    float[][] k4 = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+                    for (int q = 0; q < 4; q++) {
+                        c[q] = new float[]{px + (ux * k4[q][0] + vx * k4[q][1]) * half,
+                                py + (uy * k4[q][0] + vy * k4[q][1]) * half,
+                                pz + (uz * k4[q][0] + vz * k4[q][1]) * half};
+                    }
+                    float bright = (0.85f + rnd.nextFloat() * 0.35f) * g;
+                    fol.card(c[0], c[1], c[2], c[3], MeshBuilder.LEAVES, bx, by - ry * 0.3f, bz, 0.4f, bright,
+                            new float[]{0.35f, 0.35f, 0.35f, 0.35f});
+                }
+            }
+        }
+    }
+
+    /** Grass tufts on the banks and cattail reeds in the shallows. */
+    private static void shorePlants(MeshBuilder fol, Random rnd, Game game) {
+        int placed = 0;
+        for (int tries = 0; tries < 9000 && placed < 520; tries++) {
+            double a = rnd.nextDouble() * Math.PI * 2;
+            float q = 0.93f + rnd.nextFloat() * 0.3f;
+            float x = (float) Math.cos(a) * World.LAKE_A * q * 1.03f, z = (float) Math.sin(a) * World.LAKE_B * q * 1.03f;
+            float h = World.baseHeight(x, z);
+            if (h < -0.35f || h > 1.2f) continue;
+            // keep the view from the drivers' platform clear
+            if (Math.abs(x) < 9f && z > game.shoreZ - 6f && z < game.shoreZ + 8f) continue;
+            boolean reeds = h < 0.15f;
+            float height = reeds ? 1.1f + rnd.nextFloat() * 0.7f : 0.45f + rnd.nextFloat() * 0.5f;
+            float width = reeds ? 0.9f + rnd.nextFloat() * 0.5f : 0.7f + rnd.nextFloat() * 0.5f;
+            float[] uv = reeds ? MeshBuilder.REEDS : MeshBuilder.GRASS;
+            float bright = 0.85f + rnd.nextFloat() * 0.3f;
+            float base = h - 0.05f;
+            float rot = rnd.nextFloat() * 3.14f;
+            for (int k = 0; k < 3; k++) {
+                float an = rot + k * 1.047f;
+                float dx = (float) Math.cos(an) * width * 0.5f, dz = (float) Math.sin(an) * width * 0.5f;
+                // v = 0 is the tip (top), v = 1 the base; tips flex fully in the wind
+                fol.card(new float[]{x - dx, base + height, z - dz}, new float[]{x + dx, base + height, z + dz},
+                        new float[]{x + dx, base, z + dz}, new float[]{x - dx, base, z - dz},
+                        uv, x, base - 2f, z, 1.5f, bright, new float[]{1f, 1f, 0f, 0f});
+            }
+            placed++;
+        }
+    }
+
+    /** Orthographic sun view-projection (column-major) covering the lake area, for shadows. */
+    static float[] lightViewProj() {
+        float[] L = LIGHT;
+        float[] e = {L[0] * 300f, L[1] * 300f, L[2] * 300f};
+        float[] f = normalize(-L[0], -L[1], -L[2]);
+        float[] sv = normalize(f[1] * 0 - f[2] * 1, f[2] * 0 - f[0] * 0, f[0] * 1 - f[1] * 0); // f x up
+        float[] u = {sv[1] * f[2] - sv[2] * f[1], sv[2] * f[0] - sv[0] * f[2], sv[0] * f[1] - sv[1] * f[0]};
+        float[] v = new float[16];
+        v[0] = sv[0]; v[4] = sv[1]; v[8] = sv[2]; v[12] = -(sv[0] * e[0] + sv[1] * e[1] + sv[2] * e[2]);
+        v[1] = u[0]; v[5] = u[1]; v[9] = u[2]; v[13] = -(u[0] * e[0] + u[1] * e[1] + u[2] * e[2]);
+        v[2] = -f[0]; v[6] = -f[1]; v[10] = -f[2]; v[14] = f[0] * e[0] + f[1] * e[1] + f[2] * e[2];
+        v[15] = 1;
+        float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f, minD = 1e9f, maxD = -1e9f;
+        float ext = 125f;
+        for (int i = 0; i < 8; i++) {
+            float px = (i & 1) == 0 ? -ext : ext, py = (i & 2) == 0 ? -3f : 34f, pz = (i & 4) == 0 ? -ext : ext;
+            float vx = v[0] * px + v[4] * py + v[8] * pz + v[12];
+            float vy = v[1] * px + v[5] * py + v[9] * pz + v[13];
+            float vz = v[2] * px + v[6] * py + v[10] * pz + v[14];
+            minX = Math.min(minX, vx); maxX = Math.max(maxX, vx);
+            minY = Math.min(minY, vy); maxY = Math.max(maxY, vy);
+            minD = Math.min(minD, -vz); maxD = Math.max(maxD, -vz);
+        }
+        float n = minD - 5f, fa = maxD + 5f;
+        float[] o = new float[16];
+        o[0] = 2f / (maxX - minX); o[5] = 2f / (maxY - minY); o[10] = -2f / (fa - n);
+        o[12] = -(maxX + minX) / (maxX - minX); o[13] = -(maxY + minY) / (maxY - minY);
+        o[14] = -(fa + n) / (fa - n); o[15] = 1;
+        float[] r = new float[16];
+        for (int c = 0; c < 4; c++)
+            for (int rI = 0; rI < 4; rI++) {
+                float sum = 0;
+                for (int k = 0; k < 4; k++) sum += o[k * 4 + rI] * v[c * 4 + k];
+                r[c * 4 + rI] = sum;
+            }
+        return r;
     }
 
     private static void tree(MeshBuilder mb, Random rnd, float x, float h, float z, float s) {

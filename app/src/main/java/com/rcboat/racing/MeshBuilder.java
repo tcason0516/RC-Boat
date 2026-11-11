@@ -197,6 +197,38 @@ final class MeshBuilder {
         }
     }
 
+    // ------------------------------------------------------------------ foliage cards
+    // Foliage vertices store (u, v, flex*9 rounded + brightness/2) in the colour slot; the
+    // shader samples the foliage atlas with (u, v) and sways vertices by their flex.
+
+    static final float[] CONIFER = {0.004f, 0.004f, 0.496f, 0.496f};
+    static final float[] LEAVES = {0.504f, 0.004f, 0.996f, 0.496f};
+    static final float[] GRASS = {0.004f, 0.504f, 0.496f, 0.996f};
+    static final float[] REEDS = {0.504f, 0.504f, 0.996f, 0.996f};
+
+    void cardVertex(float x, float y, float z, float nx, float ny, float nz, float u, float v,
+                    float bright, float flex) {
+        float code = Math.round(Math.max(0f, Math.min(1f, flex)) * 9f) + Math.min(1.98f, bright) / 2f;
+        vertex(x, y, z, nx, ny, nz, u, v, code);
+    }
+
+    /**
+     * A textured quad. Corners p0..p3 map to (u0,v0) (u1,v0) (u1,v1) (u0,v1) of region uv.
+     * Normals point away from (cx, cy, cz), tilted up by upBias, for soft rounded foliage light.
+     */
+    void card(float[] p0, float[] p1, float[] p2, float[] p3, float[] uv, float cx, float cy, float cz,
+              float upBias, float bright, float[] flex) {
+        float[][] p = {p0, p1, p2, p3};
+        float[][] t = {{uv[0], uv[1]}, {uv[2], uv[1]}, {uv[2], uv[3]}, {uv[0], uv[3]}};
+        int[] order = {0, 1, 2, 0, 2, 3};
+        for (int k : order) {
+            float nx = p[k][0] - cx, ny = p[k][1] - cy + upBias, nz = p[k][2] - cz;
+            float l = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (l < 1e-4f) { nx = 0; ny = 1; nz = 0; l = 1; }
+            cardVertex(p[k][0], p[k][1], p[k][2], nx / l, ny / l, nz / l, t[k][0], t[k][1], bright, flex[k]);
+        }
+    }
+
     private static float[] unit(double theta, double phi) {
         return new float[]{(float) (Math.sin(theta) * Math.cos(phi)), (float) Math.cos(theta),
                 (float) (Math.sin(theta) * Math.sin(phi))};

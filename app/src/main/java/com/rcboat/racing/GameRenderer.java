@@ -31,6 +31,24 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             #else
             precision mediump float;
             #endif
+            float unpackDepth(vec4 c) {
+              return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+            }
+            float shadowLookup(sampler2D map, vec4 sp, float bias, float texel) {
+              vec3 p = sp.xyz / sp.w * 0.5 + 0.5;
+              if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 1.0;
+              float z = p.z - bias;
+              // 8-tap soft shadow (rotated grid, ~1.5 texel radius)
+              float s = step(z, unpackDepth(texture2D(map, p.xy + vec2(-1.5, -0.4) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(1.5, 0.4) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(-0.4, 1.5) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(0.4, -1.5) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(-0.6, -0.6) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(0.6, 0.6) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(-0.9, 0.9) * texel)))
+                      + step(z, unpackDepth(texture2D(map, p.xy + vec2(0.9, -0.9) * texel)));
+              return s * 0.125;
+            }
             vec3 grade(vec3 c) {
               c *= 1.0;
               c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
@@ -41,18 +59,33 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private static final String LIT_VS = """
             uniform mat4 uMVP;
             uniform mat4 uModel;
+            uniform mat4 uLightVP;
             uniform vec3 uTint;
+            uniform float uSway;
+            uniform float uTimeV;
             attribute vec3 aPos;
             attribute vec3 aNormal;
             attribute vec3 aColor;
             varying vec3 vColor;
             varying vec3 vNormal;
             varying vec3 vWorld;
+            varying vec4 vShadow;
+            varying float vBright;
             void main() {
-              vWorld = (uModel * vec4(aPos, 1.0)).xyz;
+              vec3 p = aPos;
+              if (uSway > 0.0) {
+                // foliage: colour slot holds (u, v, flex*9 + brightness/2); sway by flex
+                float flex = floor(aColor.b) / 9.0;
+                float ph = uTimeV * 1.7 + p.x * 0.35 + p.z * 0.27;
+                p.x += sin(ph) * uSway * flex;
+                p.z += cos(ph * 0.83) * uSway * flex * 0.6;
+              }
+              vBright = fract(aColor.b) * 2.0;
+              vWorld = (uModel * vec4(p, 1.0)).xyz;
               vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
+              vShadow = uLightVP * vec4(vWorld, 1.0);
               vColor = aColor * uTint;
-              gl_Position = uMVP * vec4(aPos, 1.0);
+              gl_Position = uMVP * vec4(p, 1.0);
             }
             """;
 
@@ -66,14 +99,27 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             uniform float uDetail;
             uniform float uClip;
             uniform float uAlpha;
+            uniform float uShadowOn;
+            uniform float uTexel;
             uniform sampler2D uNoise;
+            uniform sampler2D uAtlas;
+            uniform sampler2D uShadow;
             varying vec3 vColor;
             varying vec3 vNormal;
             varying vec3 vWorld;
+            varying vec4 vShadow;
+            varying float vBright;
             void main() {
               if (uClip > 0.5 && vWorld.y < -0.03) discard;
               vec3 base = vColor;
-              if (uDetail > 1.5) {
+              float outA = uAlpha;
+              bool leafy = uDetail > 2.5;
+              if (leafy) {
+                vec4 tx = texture2D(uAtlas, vColor.rg);
+                if (tx.a < 0.35) discard;
+                base = tx.rgb * vBright * 0.82;
+                outA = tx.a;
+              } else if (uDetail > 1.5) {
                 float d3 = texture2D(uNoise, vWorld.xz * 0.9 + vWorld.y * 0.6).r;
                 base *= 0.72 + 0.5 * d3;
               } else if (uDetail > 0.5) {
@@ -83,18 +129,21 @@ final class GameRenderer implements GLSurfaceView.Renderer {
               }
               vec3 v = normalize(uCam - vWorld);
               vec3 n = normalize(vNormal);
-              if ((uDetail < 0.5 || uDetail > 1.5) && dot(n, v) < 0.0) n = -n;
+              if ((uDetail < 0.5 || (uDetail > 1.5 && !leafy)) && dot(n, v) < 0.0) n = -n;
               float ndl = max(dot(n, uLight), 0.0);
+              float sh = uShadowOn > 0.5 ? shadowLookup(uShadow, vShadow, 0.0008 + 0.002 * (1.0 - ndl), uTexel) : 1.0;
               vec3 amb = mix(vec3(0.28, 0.26, 0.20), vec3(0.44, 0.56, 0.78), n.y * 0.5 + 0.5) * 0.5;
-              vec3 sun = vec3(1.0, 0.95, 0.85) * 1.0 * ndl;
+              vec3 sun = vec3(1.0, 0.95, 0.85) * 1.0 * ndl * sh;
               vec3 h = normalize(uLight + v);
-              float spec = uSpec * pow(max(dot(n, h), 0.0), uShine) * (0.25 + 0.75 * ndl);
+              float spec = uSpec * pow(max(dot(n, h), 0.0), uShine) * (0.25 + 0.75 * ndl) * sh;
               float rim = pow(1.0 - max(dot(n, v), 0.0), 5.0) * uSpec * 0.4;
               vec3 col = base * (amb + sun) + vec3(1.0, 0.97, 0.9) * spec + amb * rim;
+              // sunlight glowing through leaves when looking towards the sun
+              if (leafy) col += base * vec3(0.9, 1.0, 0.55) * 0.3 * pow(max(dot(-v, uLight), 0.0), 2.0) * sh;
               float f = length(uCam - vWorld) * uFogDensity;
               float fog = 1.0 - exp(-f * f);
               vec3 fogc = mix(uFogColor, vec3(1.0, 0.92, 0.78), pow(max(dot(-v, uLight), 0.0), 6.0) * 0.35);
-              gl_FragColor = vec4(grade(mix(col, fogc, fog)), uAlpha);
+              gl_FragColor = vec4(grade(mix(col, fogc, fog)), outA);
             }
             """;
 
@@ -162,9 +211,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             uniform sampler2D uNormalMap;
             uniform sampler2D uDepth;
             uniform sampler2D uNoise;
+            uniform sampler2D uShadow;
+            uniform mat4 uLightVPF;
+            uniform float uTexelF;
             varying vec3 vWorld;
             void main() {
               float x = vWorld.x, z = vWorld.z, t = uTimeF;
+              float sh = shadowLookup(uShadow, uLightVPF * vec4(vWorld, 1.0), 0.001, uTexelF);
               float dist = length(uCam - vWorld);
               vec3 v = (uCam - vWorld) / dist;
               float dx = 0.0315 * cos(x * 0.9 + t * 1.6) + 0.0315 * cos((x + z) * 2.1 + t * 2.7);
@@ -186,10 +239,10 @@ final class GameRenderer implements GLSurfaceView.Renderer {
               float depth = texture2D(uDepth, vWorld.xz / 360.0 + 0.5).r * 4.0;
               float sunN = max(dot(n, uLight), 0.0);
               vec3 body = mix(vec3(0.17, 0.43, 0.37), vec3(0.025, 0.11, 0.15), smoothstep(0.0, 2.6, depth));
-              body *= 0.55 + 0.55 * sunN;
+              body *= 0.55 + 0.55 * sunN * sh;
               vec3 h = normalize(uLight + v);
               float nh = max(dot(n, h), 0.0);
-              float spec = pow(nh, 600.0) * 3.0 + pow(nh, 80.0) * 0.12;
+              float spec = (pow(nh, 600.0) * 3.0 + pow(nh, 80.0) * 0.12) * sh;
               float foamN = texture2D(uNoise, vWorld.xz * 0.35 + vec2(t * 0.02, -t * 0.015)).r;
               float shore = 1.0 - smoothstep(0.0, 0.42, depth);
               float foam = shore * smoothstep(0.5, 0.78, foamN + 0.22 * sin(t * 1.3 - depth * 14.0) + shore * 0.3);
@@ -203,6 +256,33 @@ final class GameRenderer implements GLSurfaceView.Renderer {
               float fog = 1.0 - exp(-f * f);
               col = mix(col, grade(uFogColor), fog);
               gl_FragColor = vec4(min(col, vec3(1.0)), mix(alpha, 1.0, fog));
+            }
+            """;
+
+    /** Sun depth pass, packed into RGBA (no depth-texture extension needed). */
+    private static final String SHADOW_VS = """
+            uniform mat4 uMVP;
+            attribute vec3 aPos;
+            attribute vec3 aColor;
+            varying vec2 vUV;
+            varying float vDepth;
+            void main() {
+              gl_Position = uMVP * vec4(aPos, 1.0);
+              vDepth = gl_Position.z * 0.5 + 0.5;
+              vUV = aColor.rg;
+            }
+            """;
+
+    private static final String SHADOW_FS = FS_HEADER + """
+            uniform float uFoliage;
+            uniform sampler2D uAtlas;
+            varying vec2 vUV;
+            varying float vDepth;
+            void main() {
+              if (uFoliage > 0.5 && texture2D(uAtlas, vUV).a < 0.5) discard;
+              vec4 enc = fract(min(vDepth, 0.9999) * vec4(1.0, 255.0, 65025.0, 16581375.0));
+              enc -= enc.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+              gl_FragColor = enc;
             }
             """;
 
@@ -247,7 +327,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             wReflect, wNormalMap, wDepth, wNoise;
     private int pPos, pExtra, pVP, pColor, pNoiseAmt, pNoise;
 
-    private int texNoise, texWaterNormals, texDepthIsland, texDepthNoIsland, texBlack;
+    private int texNoise, texWaterNormals, texDepthIsland, texDepthNoIsland, texBlack, texAtlas, texWhite;
+    private int shadowProg, shPos, shColor, shMVP, shFoliage, shAtlas;
+    private int uLightVP, uSway, uTimeV, uShadowOn, uTexel, uAtlasL, uShadowL;
+    private int wShadow, wLightVP, wTexel;
+    private int shadowTex, shadowSize;
+    private boolean shadowOk;
+    private final float[] lightVP = Scenery.lightViewProj();
     private int reflFbo, reflTex, reflDepth, reflW, reflH;
     private boolean reflOk;
     private int screenW = 1, screenH = 1;
@@ -307,6 +393,20 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         uClip = GLES20.glGetUniformLocation(litProg, "uClip");
         uAlpha = GLES20.glGetUniformLocation(litProg, "uAlpha");
         uNoiseL = GLES20.glGetUniformLocation(litProg, "uNoise");
+        uLightVP = GLES20.glGetUniformLocation(litProg, "uLightVP");
+        uSway = GLES20.glGetUniformLocation(litProg, "uSway");
+        uTimeV = GLES20.glGetUniformLocation(litProg, "uTimeV");
+        uShadowOn = GLES20.glGetUniformLocation(litProg, "uShadowOn");
+        uTexel = GLES20.glGetUniformLocation(litProg, "uTexel");
+        uAtlasL = GLES20.glGetUniformLocation(litProg, "uAtlas");
+        uShadowL = GLES20.glGetUniformLocation(litProg, "uShadow");
+
+        shadowProg = program(SHADOW_VS, SHADOW_FS);
+        shPos = GLES20.glGetAttribLocation(shadowProg, "aPos");
+        shColor = GLES20.glGetAttribLocation(shadowProg, "aColor");
+        shMVP = GLES20.glGetUniformLocation(shadowProg, "uMVP");
+        shFoliage = GLES20.glGetUniformLocation(shadowProg, "uFoliage");
+        shAtlas = GLES20.glGetUniformLocation(shadowProg, "uAtlas");
 
         skyProg = program(SKY_VS, SKY_FS);
         sPos = GLES20.glGetAttribLocation(skyProg, "aPos");
@@ -330,6 +430,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         wNormalMap = GLES20.glGetUniformLocation(waterProg, "uNormalMap");
         wDepth = GLES20.glGetUniformLocation(waterProg, "uDepth");
         wNoise = GLES20.glGetUniformLocation(waterProg, "uNoise");
+        wShadow = GLES20.glGetUniformLocation(waterProg, "uShadow");
+        wLightVP = GLES20.glGetUniformLocation(waterProg, "uLightVPF");
+        wTexel = GLES20.glGetUniformLocation(waterProg, "uTexelF");
 
         partProg = program(PART_VS, PART_FS);
         pPos = GLES20.glGetAttribLocation(partProg, "aPos");
@@ -345,10 +448,16 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         texDepthIsland = texture(TextureGen.depth(true), TextureGen.DEPTH_N, GLES20.GL_LUMINANCE, false);
         texDepthNoIsland = texture(TextureGen.depth(false), TextureGen.DEPTH_N, GLES20.GL_LUMINANCE, false);
         texBlack = texture(new byte[]{(byte) 190, (byte) 205, (byte) 225}, 1, GLES20.GL_RGB, false);
+        texWhite = texture(new byte[]{-1, -1, -1, -1}, 1, GLES20.GL_RGBA, false);
+        texAtlas = texture(TextureGen.foliageAtlas(), TextureGen.ATLAS_N, GLES20.GL_RGBA, true);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAtlas);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
         reflFbo = 0;
 
         scene = new Scenery(game);
         java.util.Arrays.fill(gates, null);
+        bakeShadows();
 
         GLES20.glClearColor(Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2], 1f);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
@@ -365,6 +474,64 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glViewport(0, 0, screenW, screenH);
         aspect = (float) screenW / screenH;
         createReflectionTarget(Math.max(1, screenW / 2), Math.max(1, screenH / 2));
+    }
+
+    /**
+     * Renders the static scenery (hills, trees, platform, houses) once from the sun into a
+     * depth map. Boats and buoys keep their soft blob shadows.
+     */
+    private void bakeShadows() {
+        int[] max = new int[1];
+        GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, max, 0);
+        int[] maxRb = new int[1];
+        GLES20.glGetIntegerv(GLES20.GL_MAX_RENDERBUFFER_SIZE, maxRb, 0);
+        shadowSize = Math.min(2048, Math.min(max[0], maxRb[0]));
+        int[] id = new int[1];
+        GLES20.glGenTextures(1, id, 0);
+        shadowTex = id[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, shadowTex);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, shadowSize, shadowSize, 0, GLES20.GL_RGBA,
+                GLES20.GL_UNSIGNED_BYTE, null);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glGenRenderbuffers(1, id, 0);
+        int depth = id[0];
+        GLES20.glBindRenderbuffer(GLES20.GL_RENDERBUFFER, depth);
+        GLES20.glRenderbufferStorage(GLES20.GL_RENDERBUFFER, GLES20.GL_DEPTH_COMPONENT16, shadowSize, shadowSize);
+        GLES20.glGenFramebuffers(1, id, 0);
+        int fbo = id[0];
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, shadowTex, 0);
+        GLES20.glFramebufferRenderbuffer(GLES20.GL_FRAMEBUFFER, GLES20.GL_DEPTH_ATTACHMENT,
+                GLES20.GL_RENDERBUFFER, depth);
+        shadowOk = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE;
+        if (shadowOk) {
+            GLES20.glViewport(0, 0, shadowSize, shadowSize);
+            GLES20.glClearColor(1f, 1f, 1f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST);
+            GLES20.glUseProgram(shadowProg);
+            GLES20.glUniformMatrix4fv(shMVP, 1, false, lightVP, 0);
+            bindTex(1, texAtlas, shAtlas);
+            GLES20.glUniform1f(shFoliage, 0f);
+            scene.terrain.draw(shPos, -1, shColor);
+            scene.props.draw(shPos, -1, shColor);
+            GLES20.glUniform1f(shFoliage, 1f);
+            scene.foliage.draw(shPos, -1, shColor);
+            GLES20.glDisableVertexAttribArray(shPos);
+            GLES20.glDisableVertexAttribArray(shColor);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        } else {
+            Log.w(TAG, "Shadow framebuffer unsupported; shadows disabled");
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        GLES20.glDeleteFramebuffers(1, new int[]{fbo}, 0);
+        GLES20.glDeleteRenderbuffers(1, new int[]{depth}, 0);
+        GLES20.glClearColor(Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2], 1f);
+        GLES20.glViewport(0, 0, screenW, screenH);
     }
 
     private void createReflectionTarget(int w, int h) {
@@ -493,7 +660,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform1f(uFogDensity, FOG_DENSITY);
         GLES20.glUniform1f(uClip, reflection ? 1f : 0f);
         GLES20.glUniform1f(uAlpha, 1f);
+        GLES20.glUniformMatrix4fv(uLightVP, 1, false, lightVP, 0);
+        GLES20.glUniform1f(uShadowOn, shadowOk ? 1f : 0f);
+        GLES20.glUniform1f(uTexel, 1f / Math.max(1, shadowSize));
+        GLES20.glUniform1f(uTimeV, time);
+        GLES20.glUniform1f(uSway, 0f);
         bindTex(0, texNoise, uNoiseL);
+        bindTex(1, texAtlas, uAtlasL);
+        bindTex(2, shadowOk ? shadowTex : texWhite, uShadowL);
 
         Matrix.setIdentityM(model, 0);
         material(0.05f, 8f, true);
@@ -503,6 +677,18 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform1f(uDetail, 2f);
         drawLit(scene.props);
         if (islandOn) drawLit(scene.islandProps);
+        // alpha-tested foliage cards, softly anti-aliased via alpha-to-coverage. The blurred
+        // water reflection only needs the trees' solid cores, which saves a lot of work.
+        if (!reflection) {
+            material(0.04f, 10f, false);
+            GLES20.glUniform1f(uDetail, 3f);
+            GLES20.glUniform1f(uSway, 0.22f);
+            GLES20.glEnable(GLES20.GL_SAMPLE_ALPHA_TO_COVERAGE);
+            drawLit(scene.foliage);
+            if (islandOn) drawLit(scene.islandFoliage);
+            GLES20.glDisable(GLES20.GL_SAMPLE_ALPHA_TO_COVERAGE);
+            GLES20.glUniform1f(uSway, 0f);
+        }
         material(0.35f, 40f, false);
         drawLit(gates[track.id]);
 
@@ -568,6 +754,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         bindTex(1, texWaterNormals, wNormalMap);
         bindTex(2, islandOn ? texDepthIsland : texDepthNoIsland, wDepth);
         bindTex(3, reflOk ? reflTex : texBlack, wReflect);
+        bindTex(4, shadowOk ? shadowTex : texWhite, wShadow);
+        GLES20.glUniformMatrix4fv(wLightVP, 1, false, lightVP, 0);
+        GLES20.glUniform1f(wTexel, 1f / Math.max(1, shadowSize));
         scene.water.draw(wPos, -1, -1);
         GLES20.glDisableVertexAttribArray(wPos);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);

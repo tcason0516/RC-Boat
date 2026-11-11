@@ -381,15 +381,15 @@ final class Game {
         float k = Math.min(1f, spd / 9f);
         float out = 0.5f + spd * 0.09f;
         particles.emit(sx + rx * 0.2f, sz + rz * 0.2f, rx * out + b.vx * 0.1f, rz * out + b.vz * 0.1f,
-                2.4f, 0.22f, 1.4f, 0.45f * k + 0.1f);
+                2.0f, 0.2f, 1.1f, 0.28f * k + 0.06f);
         particles.emit(sx - rx * 0.2f, sz - rz * 0.2f, -rx * out + b.vx * 0.1f, -rz * out + b.vz * 0.1f,
-                2.4f, 0.22f, 1.4f, 0.45f * k + 0.1f);
-        particles.emit(sx, sz, b.vx * 0.15f, b.vz * 0.15f, 1.0f, 0.3f, 0.75f, 0.6f * k + 0.1f);
+                2.0f, 0.2f, 1.1f, 0.28f * k + 0.06f);
+        particles.emit(sx, sz, b.vx * 0.15f, b.vz * 0.15f, 0.9f, 0.28f, 0.65f, 0.45f * k + 0.08f);
         if (spd > 7f) {
             float bx = b.x + fx * 0.45f, bz = b.z + fz * 0.45f;
             float side = rnd.nextBoolean() ? 1f : -1f;
             particles.emit(bx + rx * 0.2f * side, bz + rz * 0.2f * side,
-                    rx * side * 1.6f + b.vx * 0.3f, rz * side * 1.6f + b.vz * 0.3f, 0.6f, 0.15f, 0.5f, 0.7f);
+                    rx * side * 1.6f + b.vx * 0.3f, rz * side * 1.6f + b.vz * 0.3f, 0.5f, 0.12f, 0.4f, 0.5f);
         }
     }
 
@@ -452,8 +452,8 @@ final class Game {
         Boat b = player;
         if (view == VIEW_FPV) {
             b.modelMatrix(tmpM, time);
-            transform(tmpM, 0f, 0.46f, 0.18f, 1f, out, 0);
-            transform(tmpM, 0f, 0.26f, -6f, 1f, out, 3);
+            transform(tmpM, 0f, 0.40f, -0.20f, 1f, out, 0);
+            transform(tmpM, 0f, 0.24f, -6f, 1f, out, 3);
             transform(tmpM, 0f, 1f, 0f, 0f, tmpV, 0);
             // soften the roll so it's not nauseating
             float ux = tmpV[0] * 0.5f, uy = tmpV[1] * 0.5f + 0.5f, uz = tmpV[2] * 0.5f;
@@ -466,7 +466,7 @@ final class Game {
         float tx = b.x, ty = b.y + 0.25f, tz = b.z;
         float dx = tx - shoreEye[0], dy = ty - shoreEye[1], dz = tz - shoreEye[2];
         float d = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
-        float fovTarget = Boat.clamp((float) Math.toDegrees(2 * Math.atan(6.5f / Math.max(d, 1f))), 10f, 58f);
+        float fovTarget = Boat.clamp((float) Math.toDegrees(2 * Math.atan(5.2f / Math.max(d, 1f))), 10f, 58f);
         if (!camInit) {
             camTarget[0] = tx; camTarget[1] = ty; camTarget[2] = tz;
             camFov = fovTarget;

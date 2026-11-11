@@ -212,14 +212,15 @@ final class Scenery {
                 mb.cylinder(s * 1.2f, -2.0f, z, 0.11f, 0.11f, dy + 2.0f, 6, 0.42f, 0.30f, 0.2f, false);
             }
         }
-        for (float z = zFar + 0.3f; z <= zNear; z += 1.2f) {
+        float railStart = zFar + 3.5f;
+        for (float z = railStart; z <= zNear; z += 1.2f) {
             for (int s = -1; s <= 1; s += 2) {
                 mb.box(s * 1.25f, dy + 0.45f, z, 0.08f, 0.9f, 0.08f, 0, 0.5f, 0.36f, 0.24f);
             }
         }
-        // rails (leave the far end open so the view over the lake is clear)
-        mb.box(-1.25f, dy + 0.9f, (zFar + zNear) / 2f, 0.07f, 0.07f, zNear - zFar, 0, 0.5f, 0.36f, 0.24f);
-        mb.box(1.25f, dy + 0.9f, (zFar + zNear) / 2f, 0.07f, 0.07f, zNear - zFar, 0, 0.5f, 0.36f, 0.24f);
+        // rails (stop short of the far end so the spectator's view over the lake is clear)
+        mb.box(-1.25f, dy + 0.9f, (railStart + zNear) / 2f, 0.07f, 0.07f, zNear - railStart, 0, 0.5f, 0.36f, 0.24f);
+        mb.box(1.25f, dy + 0.9f, (railStart + zNear) / 2f, 0.07f, 0.07f, zNear - railStart, 0, 0.5f, 0.36f, 0.24f);
 
         // boathouses on the shore
         house(mb, 30f, shoreZ - 3f, 0.4f);

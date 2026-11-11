@@ -32,7 +32,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             "attribute vec3 aColor;\n" +
             "varying vec3 vColor;\n" +
             "varying float vFog;\n" +
+            "varying float vAlpha;\n" +
             "void main() {\n" +
+            "  vAlpha = uTint.a;\n" +
             "  vec4 wp = uModel * vec4(aPos, 1.0);\n" +
             "  vec3 n = normalize((uModel * vec4(aNormal, 0.0)).xyz);\n" +
             "  float d = max(dot(n, uLight), 0.0);\n" +
@@ -47,11 +49,11 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private static final String LIT_FS =
             "precision mediump float;\n" +
             "uniform vec3 uFogColor;\n" +
-            "uniform vec4 uTint;\n" +
             "varying vec3 vColor;\n" +
             "varying float vFog;\n" +
+            "varying float vAlpha;\n" +
             "void main() {\n" +
-            "  gl_FragColor = vec4(mix(vColor, uFogColor, vFog), uTint.a);\n" +
+            "  gl_FragColor = vec4(mix(vColor, uFogColor, vFog), vAlpha);\n" +
             "}\n";
 
     private static final String WATER_VS =
@@ -73,14 +75,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             "#else\n" +
             "precision mediump float;\n" +
             "#endif\n" +
-            "uniform float uTime;\n" +
+            "uniform float uTimeF;\n" +
             "uniform vec3 uCam;\n" +
             "uniform vec3 uLight;\n" +
             "uniform vec3 uFogColor;\n" +
             "uniform float uFogDensity;\n" +
             "varying vec3 vWorld;\n" +
             "void main() {\n" +
-            "  float x = vWorld.x, z = vWorld.z, t = uTime;\n" +
+            "  float x = vWorld.x, z = vWorld.z, t = uTimeF;\n" +
             "  float dist = length(uCam - vWorld);\n" +
             "  float k = clamp(1.0 - dist / 70.0, 0.2, 1.0);\n" +
             "  float a1 = x * 4.1 + z * 1.3 + t * 3.0;\n" +
@@ -130,7 +132,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private Scenery scene;
     private int litProg, waterProg, partProg;
     private int lPos, lNormal, lColor, uMVP, uModel, uLight, uCam, uFogDensity, uLit, uTint, uFogColor;
-    private int wPos, wVP, wTime, wCam, wLight, wFogColor, wFogDensity;
+    private int wPos, wVP, wTime, wTimeF, wCam, wLight, wFogColor, wFogDensity;
     private int pPos, pExtra, pVP;
 
     private final float[] proj = new float[16], view = new float[16], vp = new float[16];
@@ -177,6 +179,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         wPos = GLES20.glGetAttribLocation(waterProg, "aPos");
         wVP = GLES20.glGetUniformLocation(waterProg, "uVP");
         wTime = GLES20.glGetUniformLocation(waterProg, "uTime");
+        wTimeF = GLES20.glGetUniformLocation(waterProg, "uTimeF");
         wCam = GLES20.glGetUniformLocation(waterProg, "uCam");
         wLight = GLES20.glGetUniformLocation(waterProg, "uLight");
         wFogColor = GLES20.glGetUniformLocation(waterProg, "uFogColor");
@@ -295,6 +298,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUseProgram(waterProg);
         GLES20.glUniformMatrix4fv(wVP, 1, false, vp, 0);
         GLES20.glUniform1f(wTime, time);
+        GLES20.glUniform1f(wTimeF, time);
         GLES20.glUniform3f(wCam, cam[0], cam[1], cam[2]);
         GLES20.glUniform3f(wLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(wFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);

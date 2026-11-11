@@ -114,7 +114,8 @@ final class Game {
         float[] skillRange = {0.84f, 0.91f, 0.975f};
         for (int i = 0; i < count; i++) {
             boolean isPlayer = withPlayer && i == 0;
-            int h = isPlayer ? hull : rnd.nextInt(Boat.HULL_NAMES.length);
+            // in a race every boat uses the hull the player picked; the menu demo shows a mix
+            int h = withPlayer ? hull : rnd.nextInt(Boat.HULL_NAMES.length);
             Boat b = new Boat(i, NAMES[i], COLORS[i], isPlayer, h, rnd);
             if (!isPlayer) {
                 b.autopilot = true;

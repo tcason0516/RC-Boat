@@ -27,7 +27,7 @@ that release. New builds install over the old one.
   - **Boat** – stabilised first person from the deck.
   - **Chase** – third person, behind and above your boat.
 - **Boats:** V-Hull (balanced), Hydroplane (fastest, slides in turns),
-  Outrigger (grippy, sharpest turning). Opponents get a random mix.
+  Outrigger (grippy, sharpest turning). Opponents race the same type of boat you pick.
 - **Tracks:** Island Loop, Grand Oval, Kidney Bean, Figure Eight, Triangle,
   Serpentine, Dog Bone, Clover, Speedway, Heart.
 - Menu options also include opponents (0–5), laps, difficulty, controls and sound.

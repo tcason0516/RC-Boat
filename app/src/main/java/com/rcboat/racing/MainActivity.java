@@ -11,6 +11,7 @@ public class MainActivity extends Activity {
     private GLSurfaceView glView;
     private Game game;
     private EngineSound sound;
+    private HudView hud;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,7 +27,7 @@ public class MainActivity extends Activity {
         glView.setPreserveEGLContextOnPause(true);
         glView.setRenderer(new GameRenderer(game));
 
-        HudView hud = new HudView(this, game);
+        hud = new HudView(this, game);
 
         FrameLayout root = new FrameLayout(this);
         root.addView(glView, new FrameLayout.LayoutParams(
@@ -66,6 +67,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         game.setPaused(true);
+        hud.stopVoice();
         sound.stop();
         glView.onPause();
     }

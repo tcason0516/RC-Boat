@@ -25,7 +25,7 @@ final class Game {
             {0.62f, 0.22f, 0.88f},   // purple
             {1.00f, 0.50f, 0.06f},   // orange
     };
-    static final String[] NAMES = {"YOU", "Blue Thunder", "Green Machine", "Yellow Jacket",
+    static final String[] NAMES = {"Dan", "Blue Thunder", "Green Machine", "Yellow Jacket",
             "Purple Haze", "Orange Crush"};
     static final String[] DIFFICULTY = {"Easy", "Normal", "Hard"};
 
@@ -38,6 +38,20 @@ final class Game {
     int hull = Boat.V_HULL;
     boolean dualStick = true;
     boolean soundOn = true;
+    boolean talkOn = true;
+
+    // ---- trash talk ----
+    final TrashTalk talk = new TrashTalk();
+    private final Random talkRnd = new Random();
+    volatile boolean talking;          // a voice clip is playing (engine sound ducks)
+    private final boolean[] aheadOfDan = new boolean[COLORS.length];
+    private final int[] lapsOnDan = new int[COLORS.length];
+    private boolean evBuoy, evShore;
+    private int evBump = -1;
+    private float startTalkDelay, finishTalkDelay, lastPlaceTimer;
+    private int lastLapSeen;
+    private boolean oppFinishSaid;
+    private float prevWrongWay, prevOffCourse;
 
     // ---- state ----
     State state = State.MENU;
@@ -179,6 +193,19 @@ final class Game {
         createBoats(1 + opponents, true);
         state = State.COUNTDOWN;
         countdown = 3.999f;
+        talk.reset();
+        for (Boat b : boats) {
+            aheadOfDan[b.id] = b.progress > player.progress;
+            lapsOnDan[b.id] = 0;
+        }
+        evBuoy = evShore = false;
+        evBump = -1;
+        startTalkDelay = 0.8f;
+        finishTalkDelay = 0;
+        lastPlaceTimer = 0;
+        lastLapSeen = 1;
+        oppFinishSaid = false;
+        prevWrongWay = prevOffCourse = 0;
         raceTime = 0;
         finishedFor = 0;
         paused = false;
@@ -256,6 +283,8 @@ final class Game {
                 break;
         }
 
+        if (player != null && state != State.MENU) talkUpdate(dt);
+
         if (player != null && state != State.MENU) {
             engineOn = true;
             engineLevel = Boat.clamp(player.speed() / Boat.BASE_MAX_SPEED, 0f, 1.2f);
@@ -318,6 +347,10 @@ final class Game {
                     a.x -= nx * push; a.z -= nz * push;
                     c.x += nx * push; c.z += nz * push;
                     float rel = (c.vx - a.vx) * nx + (c.vz - a.vz) * nz;
+                    if (rel < -1.2f) {
+                        if (a.isPlayer) evBump = c.id;
+                        else if (c.isPlayer) evBump = a.id;
+                    }
                     if (rel < 0) {
                         float imp = -rel * 0.7f;
                         a.vx -= nx * imp; a.vz -= nz * imp;
@@ -345,6 +378,7 @@ final class Game {
                         b.vx *= 0.8f;
                         b.vz *= 0.8f;
                         buoyWobble[k] = Math.min(1f, buoyWobble[k] + Math.abs(vn) * 0.12f);
+                        if (b.isPlayer && vn < -1.5f) evBuoy = true;
                     }
                 }
             }
@@ -361,6 +395,7 @@ final class Game {
                     b.z += nz * 0.08f;
                 }
                 float vn = b.vx * nx + b.vz * nz;
+                if (b.isPlayer && vn < -2.5f) evShore = true;
                 if (vn < 0) {
                     b.vx -= nx * vn * 1.3f;
                     b.vz -= nz * vn * 1.3f;
@@ -416,6 +451,7 @@ final class Game {
                 finishedFor = 0;
                 int pos = positionOf(b);
                 setMessage("FINISHED  " + ordinal(pos) + "!", 3f);
+                finishTalkDelay = 1.3f;
                 beepRequest = 880;
             }
         }
@@ -442,6 +478,108 @@ final class Game {
             particles.emit(bx + rx * 0.2f * side, bz + rz * 0.2f * side,
                     rx * side * 1.6f + b.vx * 0.3f, rz * side * 1.6f + b.vz * 0.3f, 0.5f, 0.12f, 0.4f, 0.5f);
         }
+    }
+
+    // ------------------------------------------------------------------ trash talk
+
+    private int randomOpponent(int exclude) {
+        int n = 0;
+        for (Boat b : boats) if (!b.isPlayer && b.id != exclude) n++;
+        if (n == 0) return exclude > 0 ? exclude : -1;
+        int pick = talkRnd.nextInt(n);
+        for (Boat b : boats) {
+            if (b.isPlayer || b.id == exclude) continue;
+            if (pick-- == 0) return b.id;
+        }
+        return -1;
+    }
+
+    private int nearestOpponent() {
+        int best = -1;
+        float bd = Float.MAX_VALUE;
+        for (Boat b : boats) {
+            if (b.isPlayer) continue;
+            float dx = b.x - player.x, dz = b.z - player.z;
+            float d = dx * dx + dz * dz;
+            if (d < bd) { bd = d; best = b.id; }
+        }
+        return best;
+    }
+
+    private void talkUpdate(float dt) {
+        if (paused) return;
+        talk.tick(dt);
+        boolean on = talkOn && boats.length > 1;
+        Boat p = player;
+        int speakerOfLast = talk.line >= 0 ? talk.speaker : -1;
+
+        if (startTalkDelay > 0) {
+            startTalkDelay -= dt;
+            if (startTalkDelay <= 0 && on) talk.say(TrashTalk.START, randomOpponent(-1), true);
+        }
+        if (state == State.COUNTDOWN) return;
+
+        if (finishTalkDelay > 0) {
+            finishTalkDelay -= dt;
+            if (finishTalkDelay <= 0 && on) {
+                if (positionOf(p) == 1) talk.say(TrashTalk.DAN_WINS, order.length > 1 ? order[1].id : -1, true);
+                else talk.say(TrashTalk.DAN_FINISHED, order[0].isPlayer ? randomOpponent(-1) : order[0].id, true);
+            }
+        }
+
+        if (!p.finished && on) {
+            // overtakes and laps
+            for (Boat o : boats) {
+                if (o.isPlayer) continue;
+                float gap = o.progress - p.progress;
+                int lapsAhead = (int) Math.floor((gap - 2f) / track.length);
+                if (lapsAhead > lapsOnDan[o.id] && lapsAhead >= 1) {
+                    talk.say(TrashTalk.LAPPED, o.id, false);
+                } else if (!o.finished) {
+                    boolean ahead = aheadOfDan[o.id] ? gap > -1.5f : gap > 1.5f;
+                    if (ahead != aheadOfDan[o.id] && raceTime > 2f && gap < track.length * 0.5f) {
+                        if (ahead) talk.say(TrashTalk.PASS, o.id, false);
+                        else talk.say(TrashTalk.DAN_PASSES, o.id, false);
+                    }
+                    aheadOfDan[o.id] = ahead;
+                }
+                lapsOnDan[o.id] = Math.max(lapsOnDan[o.id], lapsAhead);
+            }
+            if (evBuoy) talk.say(TrashTalk.BUOY, nearestOpponent(), false);
+            if (evBump > 0) talk.say(TrashTalk.BUMP, evBump, false);
+            if (p.wrongWayTime > 1.5f && prevWrongWay <= 1.5f)
+                talk.say(TrashTalk.WRONG_WAY, randomOpponent(speakerOfLast), false);
+            if ((p.offCourseTime > 2f && prevOffCourse <= 2f) || evShore)
+                talk.say(TrashTalk.OFF_COURSE, randomOpponent(speakerOfLast), false);
+
+            if (positionOf(p) == boats.length && raceTime > 12f) {
+                lastPlaceTimer += dt;
+                if (lastPlaceTimer > 16f && talk.say(TrashTalk.LAST_PLACE, randomOpponent(speakerOfLast), false))
+                    lastPlaceTimer = 0;
+            } else {
+                lastPlaceTimer = 0;
+            }
+
+            int lap = currentLap(p);
+            if (lap > lastLapSeen) {
+                if (lap == laps && laps > 1) talk.say(TrashTalk.FINAL_LAP, randomOpponent(speakerOfLast), false);
+                lastLapSeen = lap;
+            }
+
+            if (!oppFinishSaid) {
+                for (Boat o : boats) {
+                    if (!o.isPlayer && o.finished) {
+                        talk.say(TrashTalk.OPP_FINISHED, o.id, true);
+                        oppFinishSaid = true;
+                        break;
+                    }
+                }
+            }
+        }
+        prevWrongWay = p.wrongWayTime;
+        prevOffCourse = p.offCourseTime;
+        evBuoy = evShore = false;
+        evBump = -1;
     }
 
     private void rank() {

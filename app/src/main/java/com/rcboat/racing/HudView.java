@@ -196,7 +196,7 @@ final class HudView extends View {
 
         // ---- center messages ----
         if (game.state == Game.State.COUNTDOWN) {
-            int num = (int) Math.ceil(game.countdown);
+            int num = Math.min(3, (int) Math.ceil(game.countdown));
             textShadow(c, String.valueOf(num), w / 2f, h * 0.45f, 26 * u, 0xFFFFD54F);
             textShadow(c, "GET READY", w / 2f, h * 0.45f + 10 * u, 5 * u, Color.WHITE);
         } else if (game.messageTime > 0 && game.message.length() > 0) {

@@ -30,9 +30,10 @@ that release. New builds install over the old one.
   Outrigger (grippy, sharpest turning). Opponents race the same type of boat you pick.
 - **Tracks:** Island Loop, Grand Oval, Kidney Bean, Figure Eight, Triangle,
   Serpentine, Dog Bone, Clover, Speedway, Heart.
-- **Announcers:** a play-by-play announcer and a color commentator call the race out
-  loud — the start, green flag, lead changes, passes, buoy hits, laps to go, the white
-  flag and the finish. Voice only; turn it off with *Announcer* in the menu.
+- **Announcer:** a real voice actor (the "AAron" pack) counts down the start and calls
+  your race out loud — positions gained and lost, taking or losing the lead, buoy hits,
+  going off course or the wrong way, laps remaining and the finish. Voice only; turn it
+  off with *Announcer* in the menu.
 - Menu options also include opponents (0–5), laps, difficulty, controls and sound.
 
 ## Credits
@@ -41,8 +42,8 @@ Ground, rock, bark, plank and sky photographs are public-domain (CC0) assets fro
 [Poly Haven](https://polyhaven.com) and [ambientCG](https://ambientcg.com).
 See `tools/textures/README.md` for the list.
 
-Announcer voices were generated with the open-weight Kokoro-82M text-to-speech model
-(Apache-2.0). See `tools/announcer/README.md`.
+Announcer voice: "AAron" by Aaron Batic (AZZURRO), <https://azzurrobatic.itch.io/aaron>.
+See `tools/announcer/README.md`.
 
 ## Building yourself
 

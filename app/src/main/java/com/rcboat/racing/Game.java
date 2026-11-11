@@ -485,7 +485,7 @@ final class Game {
 
         if (annStartDelay > 0) {
             annStartDelay -= dt;
-            if (annStartDelay <= 0) a.say("start", 3, "start", 0f, Announcer.URGENT);
+            if (annStartDelay <= 0) a.say("start", 1, "start", 0f, Announcer.URGENT);
         }
         if (state == State.COUNTDOWN) return;
 
@@ -494,10 +494,12 @@ final class Game {
             annWinSaid = true;
             Boat w = order[0];
             if (w.isPlayer) {
-                a.say("winme", 3, "win", 0f, Announcer.URGENT);
+                a.say("winme", 2, "win", 0f, Announcer.URGENT);
                 annFinishSaid = true;
             } else {
-                a.say("winopp", 2, "win", 0f, Announcer.URGENT);
+                // the voice pack names "Player 1" to "Player 4": opponents 1-3 can be named
+                if (w.id <= 3) a.say("winopp_" + w.id, 0, "win", 0f, Announcer.URGENT);
+                else a.say("winoppgen", 0, "win", 0f, Announcer.URGENT);
             }
         }
         if (p.finished) {
@@ -531,7 +533,8 @@ final class Game {
         if (leader != annLeader) {
             if (settled && annLeader >= 0 && boats.length > 1) {
                 if (leader == p.id) a.say("leadme", 2, "lead", 4f, Announcer.IMPORTANT);
-                else if (annLeader == p.id) a.say("leadlost", 2, "lead", 4f, Announcer.IMPORTANT);
+                else if (leader <= 3) a.say("lead_" + leader, 0, "lead", 4f, Announcer.IMPORTANT);
+                else if (annLeader == p.id) a.say("leadlost", 1, "lead", 4f, Announcer.IMPORTANT);
             }
             annLeader = leader;
         }
@@ -540,11 +543,10 @@ final class Game {
             if (settled && annPrevPos > 0) {
                 if (pos < annPrevPos) {
                     if (pos > 1) {
-                        if (pos <= 5 && annRnd.nextFloat() < 0.6f) a.say("up_" + pos, 0, "position", 5f, Announcer.NORMAL);
-                        else a.say("upgen", 2, "position", 5f, Announcer.NORMAL);
+                        a.say("upgen", 2, "position", 5f, Announcer.NORMAL);
                     }
                 } else if (annPrevPos != 1) {   // losing the lead has its own call
-                    a.say("down", 2, "position", 5f, Announcer.NORMAL);
+                    a.say("down", 1, "position", 5f, Announcer.NORMAL);
                 }
             }
             annPrevPos = pos;
@@ -552,17 +554,17 @@ final class Game {
 
         // ---- incidents ----
         if (evBump) a.say("bump", 3, "bump", 9f, Announcer.NORMAL);
-        if (evBuoy) a.say("buoy", 4, "buoy", 9f, Announcer.NORMAL);
+        if (evBuoy) a.say("buoy", 1, "buoy", 9f, Announcer.NORMAL);
         if (p.wrongWayTime > 1.5f && annPrevWrong <= 1.5f) a.say("wrong", 3, "wrong", 10f, Announcer.IMPORTANT);
-        if ((p.offCourseTime > 2f && annPrevOff <= 2f) || evShore) a.say("off", 3, "off", 12f, Announcer.NORMAL);
+        if ((p.offCourseTime > 2f && annPrevOff <= 2f) || evShore) a.say("off", 1, "off", 12f, Announcer.NORMAL);
         annPrevWrong = p.wrongWayTime;
         annPrevOff = p.offCourseTime;
         evBuoy = evShore = evBump = false;
 
         // ---- color commentary when it has been quiet for a while ----
         if (raceTime > 8f && a.quietFor() > 20f && boats.length > 1) {
-            if (pos == boats.length) a.say("last", 3, "color", 25f, Announcer.NORMAL);
-            else if (pos == 1) a.say("front", 2, "color", 25f, Announcer.NORMAL);
+            if (pos == boats.length) a.say("last", 1, "color", 25f, Announcer.NORMAL);
+            else if (pos == 1) a.say("front", 3, "color", 25f, Announcer.NORMAL);
         }
     }
 

@@ -15,11 +15,13 @@ final class Announcer {
 
     private static final float GAP = 0.7f;          // breather between lines
     private static final float PENDING_LIFE = 4f;   // how long an IMPORTANT line may wait
+    private static final float SAME_CLIP_GAP = 15f; // the same clip is not repeated sooner
 
     private final Random rnd = new Random();
     /** Per line set: shuffled order of its variants and how many have been used. */
     private final HashMap<String, int[]> bags = new HashMap<>();
     private final HashMap<String, Float> lastSaid = new HashMap<>();
+    private final HashMap<String, Float> lastClipAt = new HashMap<>();
 
     // ---- current clip, read by the HUD (which plays it) ----
     int seq;
@@ -38,6 +40,7 @@ final class Announcer {
         lastSpoke = 0;
         pending = null;
         lastSaid.clear();
+        lastClipAt.clear();
     }
 
     void tick(float dt) {
@@ -69,6 +72,8 @@ final class Announcer {
             key = base + "_" + nextVariant(base, variants);
         }
         if (!AnnouncerClips.DURATION.containsKey(key)) return false;
+        Float lastClip = lastClipAt.get(key);
+        if (level != URGENT && lastClip != null && clock - lastClip < SAME_CLIP_GAP) return false;
         if (level == URGENT || clock >= busyUntil) {
             lastSaid.put(group, clock);
             play(key);
@@ -103,6 +108,7 @@ final class Announcer {
     private void play(String key) {
         clip = key;
         seq++;
+        lastClipAt.put(key, clock);
         lastSpoke = clock;
         busyUntil = clock + AnnouncerClips.DURATION.get(key) + GAP;
     }

@@ -2,22 +2,21 @@
 
 The trash-talk clips in `app/src/main/assets/voice/<n>/<line>.ogg` were rendered with
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0), an open-weight
-text-to-speech model, using these American English male voices, then pitched down and
-given a gritty treatment (chest EQ, rasp presence, tanh saturation, compression) in
-`generate.py`:
+text-to-speech model, using the five deepest American English male voices, unmodified
+(natural speed, no effects; clips are only trimmed and volume-levelled):
 
-| Folder | Driver | Boat | Kokoro voice | Pitch ratio |
-| --- | --- | --- | --- | --- |
-| 0 | Mike | Blue Thunder | am_michael | 0.85 |
-| 1 | Travis | Green Machine | am_echo | 0.88 |
-| 2 | Cody | Yellow Jacket | am_puck | 0.88 |
-| 3 | Hank | Purple Haze | am_onyx | 0.91 |
-| 4 | Duke | Orange Crush | am_adam | 0.80 |
+| Folder | Driver | Boat | Kokoro voice |
+| --- | --- | --- | --- |
+| 0 | Mike | Blue Thunder | am_michael |
+| 1 | Travis | Green Machine | am_echo |
+| 2 | Cody | Yellow Jacket | am_puck |
+| 3 | Hank | Purple Haze | am_onyx |
+| 4 | Duke | Orange Crush | am_liam |
 
 `lines.txt` holds the 100 lines (line N = file N-1). To re-render after editing lines:
 
 ```
-pip install kokoro-onnx soundfile        # also needs ffmpeg with libopus and rubberband
+pip install kokoro-onnx soundfile        # also needs ffmpeg with libopus
 python3 generate.py kokoro-q8.onnx voices.npz ../../app/src/main/assets/voice
 ```
 

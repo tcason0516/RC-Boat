@@ -7,14 +7,8 @@ import os, sys, subprocess, tempfile
 import numpy as np, soundfile as sf
 from kokoro_onnx import Kokoro
 
-VOICES = ["am_michael", "am_echo", "am_puck", "am_onyx", "am_adam"]   # Mike, Travis, Cody, Hank, Duke
-SPEED = [1.04, 1.02, 1.06, 1.0, 1.04]
-# Pitch ratio per voice: brings each into a deeper ~80-100 Hz range (formants shift too for a bigger chest).
-PITCH = [0.85, 0.88, 0.88, 0.91, 0.80]
-# Gritty, masculine treatment: chest boost, rasp presence, tanh saturation, compression.
-FX = ("highpass=f=60,equalizer=f=140:t=q:w=1.2:g=4,equalizer=f=2800:t=q:w=1.5:g=3,"
-      "volume=8dB,asoftclip=type=tanh,lowpass=f=7500,"
-      "acompressor=threshold=-20dB:ratio=4:attack=5:release=80:makeup=3")
+# The five deepest American male Kokoro voices, used unmodified (natural speed, no effects).
+VOICES = ["am_michael", "am_echo", "am_puck", "am_onyx", "am_liam"]   # Mike, Travis, Cody, Hank, Duke
 # A few lines are spelled differently so they are spoken naturally.
 SPOKEN = {
     "GG, Dan. Mostly G for me, though.": "G G, Dan. Mostly G for me, though.",
@@ -40,25 +34,16 @@ def main():
             continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         text = SPOKEN.get(lines[i], lines[i])
-        audio, sr = k.create(text, voice=VOICES[v], speed=SPEED[v], lang="en-us")
-        # trim leading/trailing silence, normalise peak
+        audio, sr = k.create(text, voice=VOICES[v], speed=1.0, lang="en-us")
+        # trim leading/trailing silence, normalise peak (volume only)
         idx = np.where(np.abs(audio) > 0.01)[0]
         if len(idx):
             audio = audio[max(0, idx[0] - 1200): idx[-1] + 2400]
-        audio = audio / max(1e-6, float(np.abs(audio).max())) * 0.9
+        audio = audio / max(1e-6, float(np.abs(audio).max())) * 0.97
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             sf.write(tmp.name, audio, sr)
-            chain = "rubberband=pitch=%.3f:formant=shifted,%s" % (PITCH[v], FX)
-            fx_wav = tmp.name + ".fx.wav"
-            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", tmp.name, "-af", chain, "-ac", "1",
-                            fx_wav], check=True)
-            # final peak normalisation so every clip is loud and even
-            fx, fsr = sf.read(fx_wav)
-            fx = fx / max(1e-6, float(np.abs(fx).max())) * 0.97
-            sf.write(fx_wav, fx, fsr)
-            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", fx_wav, "-ac", "1",
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", tmp.name, "-ac", "1",
                             "-c:a", "libopus", "-b:a", "32k", "-application", "voip", dst + ".part.ogg"], check=True)
-            os.unlink(fx_wav)
             os.replace(dst + ".part.ogg", dst)
             os.unlink(tmp.name)
         print("done", v, i, flush=True)

@@ -21,7 +21,7 @@ final class TrashTalk {
     private static final float[] CHANCE = {1f, 0.75f, 0.7f, 0.8f, 1f, 1f, 1f, 1f, 0.75f, 1f, 1f, 1f, 1f};
 
     /** Driver names of the opponents, by boat id (0 is Dan). */
-    static final String[] DRIVERS = {"Dan", "Mike", "Travis", "Cody", "Bella", "Nicole"};
+    static final String[] DRIVERS = {"Dan", "Mike", "Travis", "Cody", "Hank", "Duke"};
 
     static final String[] LINES = {
             "Hey Dan, the start is the part where you go forward.",

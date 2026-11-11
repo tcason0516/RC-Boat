@@ -30,7 +30,7 @@ that release. New builds install over the old one.
   Outrigger (grippy, sharpest turning). Opponents race the same type of boat you pick.
 - **Tracks:** Island Loop, Grand Oval, Kidney Bean, Figure Eight, Triangle,
   Serpentine, Dog Bone, Clover, Speedway, Heart.
-- **Trash talk:** the opponents — Mike, Travis, Cody, Bella and Nicole — heckle the
+- **Trash talk:** the opponents — Mike, Travis, Cody, Hank and Duke — heckle the
   player, Dan, out loud when they pass him, when he hits buoys or the shore, goes the
   wrong way, sits in last place, gets lapped, or finishes. Toggle it in the menu.
 - Menu options also include opponents (0–5), laps, difficulty, controls and sound.

@@ -58,8 +58,8 @@ final class EngineSound implements Runnable {
             }
             boolean on = game.soundOn && game.engineOn;
             float lvl = game.engineLevel, thr = game.engineThrottle;
-            float targetVol = on ? 0.10f + 0.22f * thr + 0.08f * lvl : 0f;
-            if (game.talking) targetVol *= 0.35f;   // duck under the trash talk
+            float targetVol = on ? 0.07f + 0.15f * thr + 0.06f * lvl : 0f;
+            if (game.talking) targetVol *= 0.18f;   // duck well under the trash talk (about -15 dB)
             float targetFreq = 110f + 520f * lvl + 90f * thr;
             boolean beepOn = game.soundOn;
             for (int i = 0; i < buf.length; i++) {

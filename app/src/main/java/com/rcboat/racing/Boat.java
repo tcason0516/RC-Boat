@@ -6,7 +6,7 @@ import java.util.Random;
 final class Boat {
     static final float RADIUS = 0.6f;
     static final float ACCEL = 7.5f;
-    static final float BASE_MAX_SPEED = 12.5f;  // m/s (~45 km/h)
+    static final float BASE_MAX_SPEED = 12.5f;  // m/s (~28 mph)
     static final float REVERSE_MAX = 3.5f;
     static final float TURN_RATE = 2.3f;        // rad/s at full lock
 

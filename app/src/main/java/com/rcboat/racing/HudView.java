@@ -195,9 +195,9 @@ final class HudView extends View {
         }
 
         // ---- speedometer ----
-        float kmh = p.speed() * 3.6f;
-        textShadow(c, String.valueOf(Math.round(kmh)), w / 2f, h - 8 * u, 10 * u, Color.WHITE);
-        textShadow(c, "km/h", w / 2f, h - 3 * u, 3.6f * u, 0xFFB8D4E8);
+        float mph = p.speed() * 2.23694f;   // m/s -> mph
+        textShadow(c, String.valueOf(Math.round(mph)), w / 2f, h - 8 * u, 10 * u, Color.WHITE);
+        textShadow(c, "MPH", w / 2f, h - 3 * u, 3.6f * u, 0xFFB8D4E8);
 
         // ---- joysticks ----
         boolean sticks = (game.state == Game.State.RACING || game.state == Game.State.COUNTDOWN)

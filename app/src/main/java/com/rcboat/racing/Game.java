@@ -38,6 +38,17 @@ final class Game {
     int hull = Boat.V_HULL;
     boolean dualStick = true;
     boolean soundOn = true;
+    boolean announcerOn = true;
+
+    // ---- race announcers (voice only) ----
+    final Announcer announcer = new Announcer();
+    volatile boolean talking;          // a voice clip is playing (engine sound ducks)
+    private final Random annRnd = new Random();
+    private boolean evBuoy, evShore, evBump;
+    private float annStartDelay, annFinishDelay;
+    private int annLeader, annPrevPos, annLeaderLap;
+    private boolean annWinSaid, annFinishSaid, annLappedSaid;
+    private float annPrevWrong, annPrevOff;
 
     // ---- state ----
     State state = State.MENU;
@@ -179,6 +190,15 @@ final class Game {
         createBoats(1 + opponents, true);
         state = State.COUNTDOWN;
         countdown = 3.999f;
+        announcer.reset();
+        evBuoy = evShore = evBump = false;
+        annStartDelay = 0.35f;
+        annFinishDelay = 0;
+        annLeader = -1;
+        annPrevPos = -1;
+        annLeaderLap = 1;
+        annWinSaid = annFinishSaid = annLappedSaid = false;
+        annPrevWrong = annPrevOff = 0;
         raceTime = 0;
         finishedFor = 0;
         paused = false;
@@ -242,6 +262,8 @@ final class Game {
                     state = State.RACING;
                     beepRequest = 1040;
                     setMessage("GO!", 1.0f);
+                    announcer.enabled = announcerOn;
+                    announcer.say("green", 4, "green", 0f, Announcer.URGENT);
                 } else if (after != before) {
                     beepRequest = 520;
                 }
@@ -255,6 +277,8 @@ final class Game {
                 simulate(dt, false);
                 break;
         }
+
+        if (player != null && state != State.MENU) announce(dt);
 
         if (player != null && state != State.MENU) {
             engineOn = true;
@@ -318,6 +342,7 @@ final class Game {
                     a.x -= nx * push; a.z -= nz * push;
                     c.x += nx * push; c.z += nz * push;
                     float rel = (c.vx - a.vx) * nx + (c.vz - a.vz) * nz;
+                    if (rel < -1.2f && (a.isPlayer || c.isPlayer)) evBump = true;
                     if (rel < 0) {
                         float imp = -rel * 0.7f;
                         a.vx -= nx * imp; a.vz -= nz * imp;
@@ -345,6 +370,7 @@ final class Game {
                         b.vx *= 0.8f;
                         b.vz *= 0.8f;
                         buoyWobble[k] = Math.min(1f, buoyWobble[k] + Math.abs(vn) * 0.12f);
+                        if (b.isPlayer && vn < -1.5f) evBuoy = true;
                     }
                 }
             }
@@ -361,6 +387,7 @@ final class Game {
                     b.z += nz * 0.08f;
                 }
                 float vn = b.vx * nx + b.vz * nz;
+                if (b.isPlayer && vn < -2.5f) evShore = true;
                 if (vn < 0) {
                     b.vx -= nx * vn * 1.3f;
                     b.vz -= nz * vn * 1.3f;
@@ -441,6 +468,111 @@ final class Game {
             float side = rnd.nextBoolean() ? 1f : -1f;
             particles.emit(bx + rx * 0.2f * side, bz + rz * 0.2f * side,
                     rx * side * 1.6f + b.vx * 0.3f, rz * side * 1.6f + b.vz * 0.3f, 0.5f, 0.12f, 0.4f, 0.5f);
+        }
+    }
+
+    // ------------------------------------------------------------------ announcers
+
+    /** Decides what the broadcast booth says about what just happened. */
+    private void announce(float dt) {
+        Announcer a = announcer;
+        a.enabled = announcerOn;
+        a.tick(dt);
+        Boat p = player;
+
+        if (annStartDelay > 0) {
+            annStartDelay -= dt;
+            if (annStartDelay <= 0) a.say("start", 3, "start", 0f, Announcer.URGENT);
+        }
+        if (state == State.COUNTDOWN) return;
+
+        // ---- the finish ----
+        if (!annWinSaid && order.length > 0 && order[0].finished) {
+            annWinSaid = true;
+            Boat w = order[0];
+            if (w.isPlayer) {
+                a.say("win_0", 2, "win", 0f, Announcer.URGENT);
+                annFinishSaid = true;
+            } else {
+                a.say("win_" + w.id, 0, "win", 0f, Announcer.URGENT);
+            }
+        }
+        if (p.finished) {
+            if (!annFinishSaid) {
+                if (annFinishDelay == 0) annFinishDelay = 0.8f;
+                annFinishDelay -= dt;
+                if (annFinishDelay <= 0) {
+                    annFinishSaid = true;
+                    a.say("fin_" + positionOf(p), 0, "finish", 0f, Announcer.URGENT);
+                }
+            }
+            evBuoy = evShore = evBump = false;
+            return;
+        }
+
+        // ---- laps to go, counted on the race leader ----
+        int leadLap = 1;
+        float leadProgress = p.progress;
+        for (Boat b : boats) {
+            leadLap = Math.max(leadLap, Math.min(laps, (int) Math.floor(b.progress / track.length) + 1));
+            leadProgress = Math.max(leadProgress, b.progress);
+        }
+        if (leadLap > annLeaderLap) {
+            annLeaderLap = leadLap;
+            int toGo = laps - leadLap + 1;
+            if (toGo == 1) a.say("white", 2, "laps", 0f, Announcer.URGENT);
+            else if (toGo <= 8) a.say("togo_" + toGo, 0, "laps", 0f, Announcer.IMPORTANT);
+        }
+
+        // ---- lead changes and the player's position ----
+        boolean settled = raceTime > 3f;
+        int leader = order.length > 0 ? order[0].id : -1;
+        if (leader != annLeader) {
+            if (settled && annLeader >= 0 && boats.length > 1) {
+                a.say("lead_" + leader, 2, "lead", 4f, Announcer.IMPORTANT);
+            }
+            annLeader = leader;
+        }
+        int pos = positionOf(p);
+        if (pos != annPrevPos) {
+            if (settled && annPrevPos > 0) {
+                if (pos < annPrevPos) {
+                    if (pos > 1) {
+                        if (pos <= 5 && annRnd.nextFloat() < 0.6f) a.say("up_" + pos, 0, "position", 5f, Announcer.NORMAL);
+                        else a.say("upgen", 3, "position", 5f, Announcer.NORMAL);
+                    }
+                } else {
+                    Boat passer = order[pos - 2];
+                    if (!passer.isPlayer && !passer.finished && annRnd.nextFloat() < 0.6f) {
+                        a.say("passed_" + passer.id, 0, "position", 5f, Announcer.NORMAL);
+                    } else {
+                        a.say("passedgen", 3, "position", 5f, Announcer.NORMAL);
+                    }
+                }
+            }
+            annPrevPos = pos;
+        }
+
+        // ---- incidents ----
+        if (evBump) a.say("bump", 4, "bump", 9f, Announcer.NORMAL);
+        if (evBuoy) a.say("buoy", 4, "buoy", 9f, Announcer.NORMAL);
+        if (p.wrongWayTime > 1.5f && annPrevWrong <= 1.5f) a.say("wrong", 3, "wrong", 10f, Announcer.IMPORTANT);
+        if ((p.offCourseTime > 2f && annPrevOff <= 2f) || evShore) a.say("off", 3, "off", 12f, Announcer.NORMAL);
+        if (!annLappedSaid && leadProgress - p.progress > track.length + 2f) {
+            annLappedSaid = true;
+            a.say("lapped", 2, "lapped", 0f, Announcer.IMPORTANT);
+        }
+        annPrevWrong = p.wrongWayTime;
+        annPrevOff = p.offCourseTime;
+        evBuoy = evShore = evBump = false;
+
+        // ---- color commentary when it has been quiet for a while ----
+        if (raceTime > 8f && a.quietFor() > 15f) {
+            boolean field = boats.length > 1;
+            float r = annRnd.nextFloat();
+            if (field && pos == boats.length && r < 0.6f) a.say("last", 3, "color", 0f, Announcer.NORMAL);
+            else if (field && pos == 1 && r < 0.6f) a.say("front", 3, "color", 0f, Announcer.NORMAL);
+            else a.say("color", 8, "color", 0f, Announcer.NORMAL);
         }
     }
 

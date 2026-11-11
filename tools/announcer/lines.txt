@@ -1,0 +1,85 @@
+start_0|A|Drivers, start your engines!
+start_1|A|Engines are fired, and the boats are on the grid!
+start_2|A|Here we go, folks. Get ready!
+green_0|A|Green flag! Green flag! We are racing at the lake!
+green_1|A|And they're off! Throttles wide open!
+green_2|A|Green flag is in the air! Here they come!
+green_3|A|Go, go, go! We are underway!
+lead_0_0|A|The red boat takes the lead!
+lead_0_1|A|The red boat is out front! What a move!
+lead_1_0|A|Blue Thunder takes the lead!
+lead_1_1|A|New leader! It's Blue Thunder out front!
+lead_2_0|A|Green Machine takes the lead!
+lead_2_1|A|New leader! It's Green Machine out front!
+lead_3_0|A|Yellow Jacket takes the lead!
+lead_3_1|A|New leader! It's Yellow Jacket out front!
+lead_4_0|A|Purple Haze takes the lead!
+lead_4_1|A|New leader! It's Purple Haze out front!
+lead_5_0|A|Orange Crush takes the lead!
+lead_5_1|A|New leader! It's Orange Crush out front!
+up_2|A|The red boat moves up to second!
+up_3|A|The red boat moves up to third!
+up_4|A|The red boat moves up to fourth!
+up_5|A|The red boat moves up to fifth!
+upgen_0|A|Great pass by the red boat!
+upgen_1|A|The red boat is on the move!
+upgen_2|B|That pass was set up beautifully.
+passed_1|A|Blue Thunder gets around the red boat!
+passed_2|A|Green Machine gets around the red boat!
+passed_3|A|Yellow Jacket gets around the red boat!
+passed_4|A|Purple Haze gets around the red boat!
+passed_5|A|Orange Crush gets around the red boat!
+passedgen_0|A|The red boat loses a spot!
+passedgen_1|A|The red boat gets shuffled back!
+passedgen_2|B|The red boat left the door wide open there.
+buoy_0|A|Oh! The red boat clips a buoy!
+buoy_1|A|The red boat got into the buoy!
+buoy_2|B|That buoy came out of nowhere. Well, not really.
+buoy_3|A|Contact with the marker! That'll cost some time!
+bump_0|A|Contact! They're trading paint out there!
+bump_1|A|Whoa! They got together!
+bump_2|B|That is some hard racing right there.
+bump_3|A|Bumper to bumper! Nobody's giving an inch!
+off_0|A|The red boat is off the racing line and in trouble!
+off_1|A|Trouble for the red boat! That's way off course!
+off_2|B|You can't win it from over there, folks.
+wrong_0|A|The red boat is going the wrong way!
+wrong_1|B|Somebody tell the red boat the race is the other direction.
+wrong_2|A|The red boat is turned around!
+togo_2|A|Two laps to go!
+togo_3|A|Three laps to go!
+togo_4|A|Four laps to go!
+togo_5|A|Five laps to go!
+togo_6|A|Six laps to go!
+togo_7|A|Seven laps to go!
+togo_8|A|Eight laps to go!
+white_0|A|White flag! One lap to go!
+white_1|A|Here comes the white flag! One more time around!
+win_0_0|A|Checkered flag! The red boat wins! What a drive!
+win_0_1|A|The red boat takes the checkered flag! Unbelievable!
+win_1|A|Checkered flag! Blue Thunder wins it!
+win_2|A|Checkered flag! Green Machine wins it!
+win_3|A|Checkered flag! Yellow Jacket wins it!
+win_4|A|Checkered flag! Purple Haze wins it!
+win_5|A|Checkered flag! Orange Crush wins it!
+fin_2|A|The red boat comes home second. So close!
+fin_3|A|Third place for the red boat. A solid run.
+fin_4|A|The red boat crosses the line in fourth.
+fin_5|A|Fifth place for the red boat.
+fin_6|A|The red boat brings it home in sixth. There's always next week.
+lapped_0|A|The red boat goes a lap down!
+lapped_1|B|The leader just put the red boat a lap down. That's a tough day.
+color_0|B|What a beautiful day for racing here at the lake.
+color_1|B|These little boats are flying out there.
+color_2|B|The water's smooth and the racing is tight.
+color_3|B|You've got to hit your marks through those buoys.
+color_4|B|This crowd on the shore is loving it.
+color_5|B|It's all about momentum off the corners here.
+color_6|B|Clean water out front makes a big difference.
+color_7|B|Tires don't matter out here, folks. It's all about the hull.
+last_0|B|The red boat has some work to do back there in last.
+last_1|B|Still time for the red boat to make something happen.
+last_2|B|The red boat needs to find some speed.
+front_0|B|The red boat looks strong out front.
+front_1|B|The red boat is setting a blistering pace.
+front_2|B|Everybody's chasing the red boat right now.

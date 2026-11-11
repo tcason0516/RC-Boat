@@ -44,5 +44,12 @@ jobs:
           gh release delete voice-model -y --cleanup-tag -R "$GITHUB_REPOSITORY" || true
           gh release create voice-model -R "$GITHUB_REPOSITORY" --prerelease \
             --title "Voice model (temporary)" \
-            --notes "Maya1 (Apache 2.0) from ${{ inputs.repo }}, split into parts. Temporary, used to render announcer clips." \
-            model.gguf.part* model.sha256 fname
+            --notes "Maya1 (Apache 2.0) from ${{ inputs.repo }}, split into parts. Temporary, used to render announcer clips."
+          sleep 5
+          for f in model.sha256 fname model.gguf.part*; do
+            for i in 1 2 3 4 5; do
+              gh release upload voice-model "$f" --clobber -R "$GITHUB_REPOSITORY" && break
+              echo "retry $f"; sleep 15
+            done
+          done
+          gh release view voice-model -R "$GITHUB_REPOSITORY"

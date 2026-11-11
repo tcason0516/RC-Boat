@@ -16,17 +16,21 @@ that release. New builds install over the old one.
 ## How to play
 
 - **Two sticks (default):** left stick = throttle (up forward, down reverse/brake),
-  right stick = steering.
-- **One stick:** a single stick on the left — up/down for throttle, left/right to steer.
+  right stick = steering. **One stick:** up/down for throttle, left/right to steer.
 - Stay between the **red** and **yellow** buoys. If you leave the course for too long
   you are put back on it.
-- Tap **SHORE / BOAT** at the top to switch camera at any time:
-  - **Shore view** – you stand on the dock and turn to follow your boat around the lake,
-    like a real RC driver. A green arrow floats over your boat. Steering is from the
-    boat's point of view, so it reverses when the boat comes towards you — just like
-    the real thing.
-  - **Boat view** – first person from the deck of your RC boat.
-- Menu options: number of opponents (0–5), laps, difficulty, camera, controls, sound.
+- Tap the view button at the top (**SHORE / BOAT / CHASE**) to switch camera any time:
+  - **Shore** – you stand with the other drivers on a 5 ft drivers' platform on the
+    shore and turn to follow your boat (green arrow). The island is removed in this
+    view so nothing blocks your line of sight. Steering is from the boat's point of
+    view, so it reverses when the boat comes towards you — just like real RC.
+  - **Boat** – stabilised first person from the deck.
+  - **Chase** – third person, behind and above your boat.
+- **Boats:** V-Hull (balanced), Hydroplane (fastest, slides in turns),
+  Outrigger (grippy, sharpest turning). Opponents get a random mix.
+- **Tracks:** Island Loop, Grand Oval, Kidney Bean, Figure Eight, Triangle,
+  Serpentine, Dog Bone, Clover, Speedway, Heart.
+- Menu options also include opponents (0–5), laps, difficulty, controls and sound.
 
 ## Building yourself
 

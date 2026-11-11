@@ -125,6 +125,78 @@ final class MeshBuilder {
         }
     }
 
+    private static float hash(int a, int b, int seed) {
+        int h = a * 374761393 + b * 668265263 + seed * 1274126177;
+        h = (h ^ (h >>> 13)) * 1274126177;
+        h ^= h >>> 16;
+        return (h & 0xffff) / 65535f;
+    }
+
+    /**
+     * Irregular conifer tier: a cone whose rim radius and height jitter around the
+     * circumference and droops at the edge. Smooth normals for soft foliage shading.
+     */
+    void foliageCone(float cx, float y0, float cz, float r, float h, int seg, int seed,
+                     float cr, float cg, float cb) {
+        float[] rx = new float[seg], ry = new float[seg], rz = new float[seg];
+        for (int i = 0; i < seg; i++) {
+            double a = 2 * Math.PI * (i + hash(i, 1, seed) * 0.35f) / seg;
+            float rr = r * (0.78f + 0.4f * hash(i, 2, seed));
+            rx[i] = cx + (float) Math.cos(a) * rr;
+            rz[i] = cz + (float) Math.sin(a) * rr;
+            ry[i] = y0 - h * 0.12f * hash(i, 3, seed);
+        }
+        float ax = cx + (hash(0, 4, seed) - 0.5f) * r * 0.15f, ay = y0 + h, az = cz + (hash(0, 5, seed) - 0.5f) * r * 0.15f;
+        for (int i = 0; i < seg; i++) {
+            int j = (i + 1) % seg;
+            float[] n0 = coneNormal(rx[i] - cx, rz[i] - cz, r, h), n1 = coneNormal(rx[j] - cx, rz[j] - cz, r, h);
+            float[] na = normalize3(n0[0] + n1[0], n0[1] + n1[1] + 0.6f, n0[2] + n1[2]);
+            float dk = 0.8f;   // darker underneath / at the rim (cheap ambient occlusion)
+            vertex(rx[i], ry[i], rz[i], n0[0], n0[1], n0[2], cr * dk, cg * dk, cb * dk);
+            vertex(rx[j], ry[j], rz[j], n1[0], n1[1], n1[2], cr * dk, cg * dk, cb * dk);
+            vertex(ax, ay, az, na[0], na[1], na[2], cr * 1.12f, cg * 1.12f, cb * 1.12f);
+            // underside
+            vertex(rx[i], ry[i], rz[i], 0, -1, 0, cr * 0.45f, cg * 0.45f, cb * 0.45f);
+            vertex(cx, y0 + h * 0.18f, cz, 0, -1, 0, cr * 0.35f, cg * 0.35f, cb * 0.35f);
+            vertex(rx[j], ry[j], rz[j], 0, -1, 0, cr * 0.45f, cg * 0.45f, cb * 0.45f);
+        }
+    }
+
+    private static float[] coneNormal(float dx, float dz, float r, float h) {
+        float l = (float) Math.sqrt(dx * dx + dz * dz);
+        return normalize3(dx / l * h, r * 0.9f, dz / l * h);
+    }
+
+    private static float[] normalize3(float x, float y, float z) {
+        float l = (float) Math.sqrt(x * x + y * y + z * z);
+        return new float[]{x / l, y / l, z / l};
+    }
+
+    /** A lumpy ellipsoid (broadleaf canopy): radius jitters per vertex, darker underneath. */
+    void lumpySphere(float cx, float cy, float cz, float rx, float ry, float rz, int seg, int rings,
+                     int seed, float cr, float cg, float cb) {
+        float[][][] p = new float[rings + 1][seg][];
+        for (int j = 0; j <= rings; j++) {
+            double t = Math.PI * j / rings;
+            for (int i = 0; i < seg; i++) {
+                double ph = 2 * Math.PI * i / seg;
+                float k = (j == 0 || j == rings) ? 1f : 0.82f + 0.36f * hash(i, j, seed);
+                float ux = (float) (Math.sin(t) * Math.cos(ph)), uy = (float) Math.cos(t), uz = (float) (Math.sin(t) * Math.sin(ph));
+                p[j][i] = new float[]{cx + ux * rx * k, cy + uy * ry * k, cz + uz * rz * k, ux, uy, uz};
+            }
+        }
+        for (int j = 0; j < rings; j++) {
+            for (int i = 0; i < seg; i++) {
+                int i1 = (i + 1) % seg;
+                float[][] q = {p[j][i], p[j][i1], p[j + 1][i1], p[j][i], p[j + 1][i1], p[j + 1][i]};
+                for (float[] v : q) {
+                    float shade = 0.62f + 0.48f * (v[4] * 0.5f + 0.5f);
+                    vertex(v[0], v[1], v[2], v[3], v[4], v[5], cr * shade, cg * shade, cb * shade);
+                }
+            }
+        }
+    }
+
     private static float[] unit(double theta, double phi) {
         return new float[]{(float) (Math.sin(theta) * Math.cos(phi)), (float) Math.cos(theta),
                 (float) (Math.sin(theta) * Math.sin(phi))};

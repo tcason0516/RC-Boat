@@ -78,28 +78,33 @@ final class Scenery {
                 + Math.sin(z * 0.27 - x * 0.11) * 0.3 + Math.sin(x * 1.3 + z * 1.1) * 0.2);
     }
 
-    private static float[] groundColor(float x, float z, float h) {
+    private static float[] mix(float[] a, float[] b, float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        return new float[]{a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+    }
+
+    /** Ground colour from position, height and surface steepness (ny = normal's up component). */
+    private static float[] groundColor(float x, float z, float h, float ny) {
         float q = World.lakeQ(x, z);
         float ix = (x - World.ISLAND_X) / World.ISLAND_RX, iz = (z - World.ISLAND_Z) / World.ISLAND_RZ;
         boolean nearWater = q < 1.2f || (ix * ix + iz * iz) < 1f;
         float n = noise(x, z);
-        float[] sand = {0.84f, 0.77f, 0.57f};
-        float[] grass = {0.32f + 0.05f * n, 0.55f + 0.07f * n, 0.22f + 0.03f * n};
-        if (h > 12f) {
-            float t = Math.min(1f, (h - 12f) / 8f);
-            grass[0] += (0.46f - grass[0]) * t;
-            grass[1] += (0.46f - grass[1]) * t;
-            grass[2] += (0.40f - grass[2]) * t;
-        }
-        if (h < -0.05f) {
-            float t = Math.min(1f, -h / 2.5f);
-            return new float[]{0.70f + (0.20f - 0.70f) * t, 0.64f + (0.30f - 0.64f) * t, 0.46f + (0.27f - 0.46f) * t};
-        }
+        float patch = noise(x * 0.23f + 40f, z * 0.23f - 17f);       // large meadow patches
+        float[] lush = {0.26f + 0.04f * n, 0.42f + 0.06f * n, 0.16f + 0.02f * n};
+        float[] dry = {0.50f + 0.04f * n, 0.48f + 0.04f * n, 0.28f};
+        float[] grass = mix(lush, dry, (patch - 0.15f) * 1.4f);
+        float[] rock = {0.42f + 0.05f * n, 0.40f + 0.05f * n, 0.36f + 0.04f * n};
+        float[] sand = {0.78f, 0.71f, 0.52f};
+        float[] wet = {0.52f, 0.46f, 0.33f};
+        float[] silt = {0.20f, 0.24f, 0.18f};
+        if (h > 19f) grass = mix(grass, rock, (h - 19f) / 8f);
+        // steep slopes show rock and dirt
+        grass = mix(grass, rock, (0.86f - ny) * 6f);
+        if (h < -0.05f) return mix(mix(wet, sand, 0.3f), silt, -h / 2.2f);
         if (!nearWater) return grass;
+        if (h < 0.22f) return mix(wet, sand, (h + 0.05f) / 0.27f);
         if (h < 0.6f) return sand;
-        float t = Math.min(1f, (h - 0.6f) / 0.6f);
-        return new float[]{sand[0] + (grass[0] - sand[0]) * t, sand[1] + (grass[1] - sand[1]) * t,
-                sand[2] + (grass[2] - sand[2]) * t};
+        return mix(sand, grass, (h - 0.6f) / 0.6f);
     }
 
     private Mesh buildTerrain() {
@@ -117,7 +122,7 @@ final class Scenery {
                 float gx = (World.baseHeight(x + e, z) - World.baseHeight(x - e, z)) / (2 * e);
                 float gz = (World.baseHeight(x, z + e) - World.baseHeight(x, z - e)) / (2 * e);
                 float[] nn = normalize(-gx, 1f, -gz);
-                float[] c = groundColor(x, z, h);
+                float[] c = groundColor(x, z, h, nn[1]);
                 int o = (j * n + i) * Mesh.FLOATS;
                 data[o] = x; data[o + 1] = h; data[o + 2] = z;
                 data[o + 3] = nn[0]; data[o + 4] = nn[1]; data[o + 5] = nn[2];
@@ -167,7 +172,7 @@ final class Scenery {
 
         // trees around the lake
         int placed = 0;
-        for (int tries = 0; tries < 4000 && placed < 260; tries++) {
+        for (int tries = 0; tries < 14000 && placed < 600; tries++) {
             float x = (rnd.nextFloat() * 2 - 1) * 165f;
             float z = (rnd.nextFloat() * 2 - 1) * 165f;
             float h = World.baseHeight(x, z);
@@ -260,7 +265,7 @@ final class Scenery {
                 float gx = (islandSurface(x + e, z) - islandSurface(x - e, z)) / (2 * e);
                 float gz = (islandSurface(x, z + e) - islandSurface(x, z - e)) / (2 * e);
                 float[] nn = normalize(-gx, 1f, -gz);
-                float[] c = groundColor(x, z, h);
+                float[] c = groundColor(x, z, h, nn[1]);
                 int o = (j * nx + i) * Mesh.FLOATS;
                 data[o] = x; data[o + 1] = h; data[o + 2] = z;
                 data[o + 3] = nn[0]; data[o + 4] = nn[1]; data[o + 5] = nn[2];
@@ -365,17 +370,29 @@ final class Scenery {
     }
 
     private static void tree(MeshBuilder mb, Random rnd, float x, float h, float z, float s) {
-        mb.cylinder(x, h - 0.2f, z, 0.22f * s, 0.16f * s, 1.6f * s, 6, 0.40f, 0.28f, 0.18f, false);
-        float g = 0.75f + rnd.nextFloat() * 0.35f;
-        if (rnd.nextFloat() < 0.6f) {
-            // conifer
-            mb.cylinder(x, h + 1.0f * s, z, 1.7f * s, 0f, 3.0f * s, 7, 0.13f * g, 0.38f * g, 0.18f * g, true);
-            mb.cylinder(x, h + 2.4f * s, z, 1.25f * s, 0f, 2.6f * s, 7, 0.15f * g, 0.43f * g, 0.2f * g, true);
+        float bark = 0.85f + rnd.nextFloat() * 0.3f;
+        float g = 0.8f + rnd.nextFloat() * 0.35f;
+        int seed = rnd.nextInt();
+        if (rnd.nextFloat() < 0.62f) {
+            // conifer: four irregular, drooping tiers
+            s *= 1.1f + rnd.nextFloat() * 0.25f;
+            mb.cylinder(x, h - 0.2f, z, 0.2f * s, 0.12f * s, 1.4f * s, 6, 0.33f * bark, 0.23f * bark, 0.15f * bark, false);
+            float[] y0 = {0.7f, 1.9f, 3.0f, 4.0f}, r = {1.75f, 1.4f, 1.05f, 0.65f}, hh = {2.3f, 2.1f, 1.9f, 1.7f};
+            for (int t = 0; t < 4; t++) {
+                float k = 0.85f + t * 0.07f;
+                mb.foliageCone(x, h + y0[t] * s, z, r[t] * s, hh[t] * s, 9, seed + t,
+                        0.09f * g * k, 0.22f * g * k, 0.11f * g * k);
+            }
         } else {
-            // broadleaf
-            mb.sphere(x, h + 2.4f * s, z, 1.6f * s, 1.4f * s, 1.6f * s, 8, 5, 0.25f * g, 0.52f * g, 0.18f * g);
-            mb.sphere(x + 0.6f * s, h + 3.1f * s, z - 0.3f * s, 1.0f * s, 0.9f * s, 1.0f * s, 7, 4,
-                    0.28f * g, 0.56f * g, 0.2f * g);
+            // broadleaf: lumpy overlapping canopy blobs
+            mb.cylinder(x, h - 0.2f, z, 0.24f * s, 0.16f * s, 2.2f * s, 6, 0.36f * bark, 0.27f * bark, 0.18f * bark, false);
+            float hue = rnd.nextFloat() * 0.06f;
+            float cr = (0.19f + hue) * g, cg = 0.37f * g, cb = 0.12f * g;
+            mb.lumpySphere(x, h + 2.6f * s, z, 1.7f * s, 1.35f * s, 1.7f * s, 9, 5, seed, cr, cg, cb);
+            mb.lumpySphere(x + 0.75f * s, h + 3.3f * s, z - 0.3f * s, 1.15f * s, 1.0f * s, 1.15f * s, 8, 4, seed + 1,
+                    cr * 1.08f, cg * 1.08f, cb);
+            mb.lumpySphere(x - 0.65f * s, h + 3.1f * s, z + 0.45f * s, 1.05f * s, 0.95f * s, 1.05f * s, 8, 4, seed + 2,
+                    cr * 1.04f, cg * 1.04f, cb);
         }
     }
 
@@ -477,12 +494,9 @@ final class Scenery {
                 new float[]{0.12f, 0.05f, 0.02f, 0.0f, 0.0f, 0.0f},
                 new float[]{0.12f, -0.03f, -0.08f, -0.10f, -0.10f, -0.09f},
                 col, dark(col, 0.35f), WHITE, 2);
-        // canopy / cockpit
-        mb.box(0, 0.215f, 0.10f, 0.30f, 0.11f, 0.46f, 0, 0.08f, 0.10f, 0.13f);
-        mb.box(0, 0.28f, 0.16f, 0.26f, 0.04f, 0.32f, 0, col[0], col[1], col[2]);
-        float[] w0 = {-0.15f, 0.16f, -0.13f}, w1 = {0.15f, 0.16f, -0.13f};
-        float[] w2 = {0.15f, 0.27f, -0.02f}, w3 = {-0.15f, 0.27f, -0.02f};
-        mb.quad(w0, w1, w2, w3, new float[]{0, 0.1f, 0.2f}, new float[]{0.15f, 0.25f, 0.32f});
+        // smooth cowling with a tinted glass canopy
+        mb.sphere(0, 0.16f, 0.14f, 0.16f, 0.10f, 0.30f, 14, 7, col[0], col[1], col[2]);
+        mb.sphere(0, 0.19f, -0.02f, 0.115f, 0.085f, 0.15f, 14, 7, 0.05f, 0.08f, 0.11f);
         // stern details: rudder, prop strut, antenna, number plate
         mb.box(0.12f, -0.05f, 0.66f, 0.02f, 0.16f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(0, -0.08f, 0.66f, 0.03f, 0.03f, 0.1f, 0, 0.75f, 0.75f, 0.78f);
@@ -513,9 +527,9 @@ final class Scenery {
                 new float[]{0.12f, 0.08f, 0.07f, 0.07f},
                 new float[]{0.11f, 0.05f, 0.04f, 0.05f},
                 col, dark(col, 0.35f), WHITE, 0);
-        // cockpit canopy
-        mb.box(0, 0.27f, 0.02f, 0.2f, 0.1f, 0.42f, 0, 0.08f, 0.1f, 0.13f);
-        mb.sphere(0, 0.30f, -0.18f, 0.1f, 0.07f, 0.12f, 8, 4, 0.15f, 0.25f, 0.32f);
+        // cowling and tinted glass canopy
+        mb.sphere(0, 0.22f, 0.10f, 0.13f, 0.09f, 0.32f, 14, 7, col[0], col[1], col[2]);
+        mb.sphere(0, 0.25f, -0.10f, 0.09f, 0.075f, 0.13f, 14, 7, 0.05f, 0.08f, 0.11f);
         // rear wing on two fins
         for (int s = -1; s <= 1; s += 2) {
             mb.box(s * 0.12f, 0.33f, 0.55f, 0.02f, 0.2f, 0.12f, 0, col[0], col[1], col[2]);
@@ -551,9 +565,9 @@ final class Scenery {
         for (float z : new float[]{-0.56f, -0.24f}) {
             mb.box(0, 0.145f, z, 0.76f, 0.03f, 0.05f, 0, 0.7f, 0.7f, 0.72f);
         }
-        // canopy, tail fin, rudder, antenna
-        mb.box(0, 0.22f, 0.12f, 0.18f, 0.1f, 0.38f, 0, 0.08f, 0.1f, 0.13f);
-        mb.box(0, 0.28f, 0.15f, 0.15f, 0.03f, 0.28f, 0, col[0], col[1], col[2]);
+        // cowling + glass canopy, tail fin, rudder, antenna
+        mb.sphere(0, 0.16f, 0.15f, 0.11f, 0.09f, 0.30f, 14, 7, col[0], col[1], col[2]);
+        mb.sphere(0, 0.19f, 0.0f, 0.08f, 0.07f, 0.12f, 14, 7, 0.05f, 0.08f, 0.11f);
         mb.box(0, 0.3f, 0.52f, 0.02f, 0.26f, 0.18f, 0, col[0], col[1], col[2]);
         mb.box(0.09f, -0.05f, 0.62f, 0.02f, 0.15f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(0, -0.07f, 0.66f, 0.03f, 0.03f, 0.1f, 0, 0.75f, 0.75f, 0.78f);

@@ -14,139 +14,259 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.opengles.GL10;
 
+/**
+ * OpenGL ES 2.0 renderer: per-pixel lit scene with filmic tone mapping, procedural cloudy
+ * sky, water with planar reflections, depth-based colour, shore foam and sun glints, blob
+ * shadows and wake foam.
+ */
 final class GameRenderer implements GLSurfaceView.Renderer {
     private static final String TAG = "RCBoat";
 
     // ------------------------------------------------------------------ shaders
 
-    private static final String LIT_VS =
-            "uniform mat4 uMVP;\n" +
-            "uniform mat4 uModel;\n" +
-            "uniform vec3 uLight;\n" +
-            "uniform vec3 uCam;\n" +
-            "uniform float uFogDensity;\n" +
-            "uniform float uLit;\n" +
-            "uniform vec4 uTint;\n" +
-            "attribute vec3 aPos;\n" +
-            "attribute vec3 aNormal;\n" +
-            "attribute vec3 aColor;\n" +
-            "varying vec3 vColor;\n" +
-            "varying float vFog;\n" +
-            "varying float vAlpha;\n" +
-            "void main() {\n" +
-            "  vAlpha = uTint.a;\n" +
-            "  vec4 wp = uModel * vec4(aPos, 1.0);\n" +
-            "  vec3 n = normalize((uModel * vec4(aNormal, 0.0)).xyz);\n" +
-            "  float d = max(dot(n, uLight), 0.0);\n" +
-            "  float sky = 0.5 + 0.5 * n.y;\n" +
-            "  vec3 light = vec3(0.30, 0.34, 0.40) * sky + vec3(1.0, 0.96, 0.88) * d * 0.80 + 0.10;\n" +
-            "  vColor = aColor * uTint.rgb * mix(vec3(1.0), light, uLit);\n" +
-            "  float f = length(wp.xyz - uCam) * uFogDensity;\n" +
-            "  vFog = 1.0 - exp(-f * f);\n" +
-            "  gl_Position = uMVP * vec4(aPos, 1.0);\n" +
-            "}\n";
+    /** Shared fragment header: precision and filmic (ACES-style) tone mapping. */
+    private static final String FS_HEADER = """
+            #ifdef GL_FRAGMENT_PRECISION_HIGH
+            precision highp float;
+            #else
+            precision mediump float;
+            #endif
+            vec3 grade(vec3 c) {
+              c *= 1.0;
+              c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
+              return clamp(c, 0.0, 1.0);
+            }
+            """;
 
-    private static final String LIT_FS =
-            "precision mediump float;\n" +
-            "uniform vec3 uFogColor;\n" +
-            "varying vec3 vColor;\n" +
-            "varying float vFog;\n" +
-            "varying float vAlpha;\n" +
-            "void main() {\n" +
-            "  gl_FragColor = vec4(mix(vColor, uFogColor, vFog), vAlpha);\n" +
-            "}\n";
+    private static final String LIT_VS = """
+            uniform mat4 uMVP;
+            uniform mat4 uModel;
+            uniform vec3 uTint;
+            attribute vec3 aPos;
+            attribute vec3 aNormal;
+            attribute vec3 aColor;
+            varying vec3 vColor;
+            varying vec3 vNormal;
+            varying vec3 vWorld;
+            void main() {
+              vWorld = (uModel * vec4(aPos, 1.0)).xyz;
+              vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
+              vColor = aColor * uTint;
+              gl_Position = uMVP * vec4(aPos, 1.0);
+            }
+            """;
 
-    private static final String WATER_VS =
-            "uniform mat4 uVP;\n" +
-            "uniform float uTime;\n" +
-            "attribute vec3 aPos;\n" +
-            "varying vec3 vWorld;\n" +
-            "void main() {\n" +
-            "  vec3 p = aPos;\n" +
-            "  p.y = 0.035 * sin(p.x * 0.9 + uTime * 1.6) + 0.025 * sin(p.z * 1.3 - uTime * 1.9)\n" +
-            "      + 0.015 * sin((p.x + p.z) * 2.1 + uTime * 2.7);\n" +
-            "  vWorld = p;\n" +
-            "  gl_Position = uVP * vec4(p, 1.0);\n" +
-            "}\n";
+    private static final String LIT_FS = FS_HEADER + """
+            uniform vec3 uLight;
+            uniform vec3 uCam;
+            uniform vec3 uFogColor;
+            uniform float uFogDensity;
+            uniform float uSpec;
+            uniform float uShine;
+            uniform float uDetail;
+            uniform float uClip;
+            uniform float uAlpha;
+            uniform sampler2D uNoise;
+            varying vec3 vColor;
+            varying vec3 vNormal;
+            varying vec3 vWorld;
+            void main() {
+              if (uClip > 0.5 && vWorld.y < -0.03) discard;
+              vec3 base = vColor;
+              if (uDetail > 1.5) {
+                float d3 = texture2D(uNoise, vWorld.xz * 0.9 + vWorld.y * 0.6).r;
+                base *= 0.72 + 0.5 * d3;
+              } else if (uDetail > 0.5) {
+                float d1 = texture2D(uNoise, vWorld.xz * 0.37).r;
+                float d2 = texture2D(uNoise, vWorld.xz * 0.043).r;
+                base *= 0.74 + 0.32 * d1 + 0.3 * (d2 - 0.5);
+              }
+              vec3 v = normalize(uCam - vWorld);
+              vec3 n = normalize(vNormal);
+              if ((uDetail < 0.5 || uDetail > 1.5) && dot(n, v) < 0.0) n = -n;
+              float ndl = max(dot(n, uLight), 0.0);
+              vec3 amb = mix(vec3(0.28, 0.26, 0.20), vec3(0.44, 0.56, 0.78), n.y * 0.5 + 0.5) * 0.5;
+              vec3 sun = vec3(1.0, 0.95, 0.85) * 1.0 * ndl;
+              vec3 h = normalize(uLight + v);
+              float spec = uSpec * pow(max(dot(n, h), 0.0), uShine) * (0.25 + 0.75 * ndl);
+              float rim = pow(1.0 - max(dot(n, v), 0.0), 5.0) * uSpec * 0.4;
+              vec3 col = base * (amb + sun) + vec3(1.0, 0.97, 0.9) * spec + amb * rim;
+              float f = length(uCam - vWorld) * uFogDensity;
+              float fog = 1.0 - exp(-f * f);
+              vec3 fogc = mix(uFogColor, vec3(1.0, 0.92, 0.78), pow(max(dot(-v, uLight), 0.0), 6.0) * 0.35);
+              gl_FragColor = vec4(grade(mix(col, fogc, fog)), uAlpha);
+            }
+            """;
 
-    private static final String WATER_FS =
-            "#ifdef GL_FRAGMENT_PRECISION_HIGH\n" +
-            "precision highp float;\n" +
-            "#else\n" +
-            "precision mediump float;\n" +
-            "#endif\n" +
-            "uniform float uTimeF;\n" +
-            "uniform vec3 uCam;\n" +
-            "uniform vec3 uLight;\n" +
-            "uniform vec3 uFogColor;\n" +
-            "uniform float uFogDensity;\n" +
-            "varying vec3 vWorld;\n" +
-            "void main() {\n" +
-            "  float x = vWorld.x, z = vWorld.z, t = uTimeF;\n" +
-            "  float dist = length(uCam - vWorld);\n" +
-            "  float k = clamp(1.0 - dist / 70.0, 0.2, 1.0);\n" +
-            "  float a1 = x * 4.1 + z * 1.3 + t * 3.0;\n" +
-            "  float a2 = -x * 2.3 + z * 5.2 + t * 2.6;\n" +
-            "  float a3 = x * 7.7 - z * 6.1 + t * 4.0;\n" +
-            "  float dx = 0.0315 * cos(x * 0.9 + t * 1.6) + 0.0315 * cos((x + z) * 2.1 + t * 2.7)\n" +
-            "     + k * (0.049 * cos(a1) - 0.023 * cos(a2) + 0.031 * cos(a3));\n" +
-            "  float dz = 0.0325 * cos(z * 1.3 - t * 1.9) + 0.0315 * cos((x + z) * 2.1 + t * 2.7)\n" +
-            "     + k * (0.016 * cos(a1) + 0.052 * cos(a2) - 0.024 * cos(a3));\n" +
-            "  vec3 n = normalize(vec3(-dx, 1.0, -dz));\n" +
-            "  vec3 v = normalize(uCam - vWorld);\n" +
-            "  float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);\n" +
-            "  vec3 deep = vec3(0.04, 0.24, 0.32);\n" +
-            "  vec3 skyc = vec3(0.72, 0.84, 0.95);\n" +
-            "  vec3 col = mix(deep, skyc, 0.10 + 0.78 * fres);\n" +
-            "  vec3 h = normalize(uLight + v);\n" +
-            "  float spec = pow(max(dot(n, h), 0.0), 140.0) * 1.3;\n" +
-            "  col += vec3(1.0, 0.95, 0.85) * spec;\n" +
-            "  float alpha = clamp(0.70 + 0.28 * fres + spec, 0.0, 1.0);\n" +
-            "  float f = dist * uFogDensity;\n" +
-            "  col = mix(col, uFogColor, 1.0 - exp(-f * f));\n" +
-            "  gl_FragColor = vec4(col, alpha);\n" +
-            "}\n";
+    private static final String SKY_VS = """
+            uniform mat4 uMVP;
+            attribute vec3 aPos;
+            varying vec3 vDir;
+            void main() {
+              vDir = aPos;
+              gl_Position = uMVP * vec4(aPos, 1.0);
+            }
+            """;
 
-    private static final String PART_VS =
-            "uniform mat4 uVP;\n" +
-            "attribute vec3 aPos;\n" +
-            "attribute vec3 aExtra;\n" +
-            "varying vec3 vExtra;\n" +
-            "void main() {\n" +
-            "  vExtra = aExtra;\n" +
-            "  gl_Position = uVP * vec4(aPos, 1.0);\n" +
-            "}\n";
+    private static final String SKY_FS = FS_HEADER + """
+            uniform vec3 uLight;
+            uniform vec3 uFogColor;
+            uniform float uTimeS;
+            uniform sampler2D uNoise;
+            varying vec3 vDir;
+            void main() {
+              vec3 d = normalize(vDir);
+              float up = max(d.y, 0.0);
+              vec3 col = mix(uFogColor, vec3(0.15, 0.34, 0.70), pow(up, 0.45));
+              float sd = max(dot(d, uLight), 0.0);
+              col += vec3(1.0, 0.86, 0.62) * (pow(sd, 6.0) * 0.2 + pow(sd, 64.0) * 0.35);
+              col += vec3(1.8, 1.7, 1.5) * smoothstep(0.9994, 0.9997, sd);
+              if (d.y > 0.0) {
+                vec2 uv = d.xz / (d.y + 0.12) * 0.2 + vec2(uTimeS * 0.004, uTimeS * 0.0015);
+                float c = texture2D(uNoise, uv).r * 0.6 + texture2D(uNoise, uv * 2.7 + 0.3).r * 0.3
+                        + texture2D(uNoise, uv * 6.1 + 0.7).r * 0.1;
+                float cover = smoothstep(0.52, 0.78, c) * smoothstep(0.0, 0.2, d.y);
+                float lit = texture2D(uNoise, uv - uLight.xz * 0.015).r;
+                vec3 cloud = mix(vec3(0.60, 0.64, 0.70), vec3(1.08, 1.06, 1.02), clamp(0.55 + (c - lit) * 3.0, 0.0, 1.0));
+                cloud += vec3(1.0, 0.9, 0.7) * pow(sd, 8.0) * 0.4;
+                col = mix(col, cloud, cover * 0.92);
+              } else {
+                col = uFogColor * 0.96;
+              }
+              gl_FragColor = vec4(grade(col), 1.0);
+            }
+            """;
 
-    private static final String PART_FS =
-            "precision mediump float;\n" +
-            "varying vec3 vExtra;\n" +
-            "void main() {\n" +
-            "  float d = length(vExtra.xy);\n" +
-            "  float a = (1.0 - smoothstep(0.35, 1.0, d)) * vExtra.z;\n" +
-            "  gl_FragColor = vec4(0.94, 0.97, 1.0, a);\n" +
-            "}\n";
+    private static final String WATER_VS = """
+            uniform mat4 uVP;
+            uniform float uTime;
+            attribute vec3 aPos;
+            varying vec3 vWorld;
+            void main() {
+              vec3 p = aPos;
+              p.y = 0.035 * sin(p.x * 0.9 + uTime * 1.6) + 0.025 * sin(p.z * 1.3 - uTime * 1.9)
+                  + 0.015 * sin((p.x + p.z) * 2.1 + uTime * 2.7);
+              vWorld = p;
+              gl_Position = uVP * vec4(p, 1.0);
+            }
+            """;
+
+    private static final String WATER_FS = FS_HEADER + """
+            uniform float uTimeF;
+            uniform vec3 uCam;
+            uniform vec3 uLight;
+            uniform vec3 uFogColor;
+            uniform float uFogDensity;
+            uniform vec2 uScreen;
+            uniform sampler2D uReflect;
+            uniform sampler2D uNormalMap;
+            uniform sampler2D uDepth;
+            uniform sampler2D uNoise;
+            varying vec3 vWorld;
+            void main() {
+              float x = vWorld.x, z = vWorld.z, t = uTimeF;
+              float dist = length(uCam - vWorld);
+              vec3 v = (uCam - vWorld) / dist;
+              float dx = 0.0315 * cos(x * 0.9 + t * 1.6) + 0.0315 * cos((x + z) * 2.1 + t * 2.7);
+              float dz = 0.0325 * cos(z * 1.3 - t * 1.9) + 0.0315 * cos((x + z) * 2.1 + t * 2.7);
+              vec4 a = texture2D(uNormalMap, vWorld.xz * 0.045 + vec2(t * 0.010, t * 0.006));
+              vec4 b = texture2D(uNormalMap, vWorld.xz * 0.11 + vec2(-t * 0.008, t * 0.013));
+              vec2 ripple = (a.rg * 2.0 - 1.0) + (b.rg * 2.0 - 1.0);
+              float detail = 0.28 * clamp(1.0 - dist / 140.0, 0.35, 1.0);
+              vec3 n = normalize(vec3(-dx + ripple.x * detail, 1.0, -dz + ripple.y * detail));
+              float ndv = max(dot(n, v), 0.0);
+              float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+              // ripples break up and soften the mirror image (4-tap blur)
+              vec2 suv = gl_FragCoord.xy / uScreen + n.xz * (0.03 + 0.03 * clamp(5.0 / dist, 0.0, 1.0));
+              vec2 bl = vec2(0.006, 0.010);
+              vec3 refl = 0.25 * (texture2D(uReflect, clamp(suv + bl * vec2(1.0, 0.4), 0.002, 0.998)).rgb
+                                + texture2D(uReflect, clamp(suv - bl * vec2(1.0, 0.4), 0.002, 0.998)).rgb
+                                + texture2D(uReflect, clamp(suv + bl * vec2(-0.4, 1.0), 0.002, 0.998)).rgb
+                                + texture2D(uReflect, clamp(suv - bl * vec2(-0.4, 1.0), 0.002, 0.998)).rgb);
+              float depth = texture2D(uDepth, vWorld.xz / 360.0 + 0.5).r * 4.0;
+              float sunN = max(dot(n, uLight), 0.0);
+              vec3 body = mix(vec3(0.17, 0.43, 0.37), vec3(0.025, 0.11, 0.15), smoothstep(0.0, 2.6, depth));
+              body *= 0.55 + 0.55 * sunN;
+              vec3 h = normalize(uLight + v);
+              float nh = max(dot(n, h), 0.0);
+              float spec = pow(nh, 600.0) * 3.0 + pow(nh, 80.0) * 0.12;
+              float foamN = texture2D(uNoise, vWorld.xz * 0.35 + vec2(t * 0.02, -t * 0.015)).r;
+              float shore = 1.0 - smoothstep(0.0, 0.42, depth);
+              float foam = shore * smoothstep(0.5, 0.78, foamN + 0.22 * sin(t * 1.3 - depth * 14.0) + shore * 0.3);
+              vec3 col = mix(grade(body), refl, fres);
+              col += vec3(1.0, 0.95, 0.85) * spec;
+              col = mix(col, vec3(0.92, 0.95, 0.95), foam * 0.85);
+              float alpha = mix(0.38, 0.96, smoothstep(0.05, 1.8, depth));
+              alpha = max(max(alpha, min(1.0, fres * 1.3)), foam);
+              alpha = clamp(alpha + spec, 0.0, 1.0);
+              float f = dist * uFogDensity;
+              float fog = 1.0 - exp(-f * f);
+              col = mix(col, grade(uFogColor), fog);
+              gl_FragColor = vec4(min(col, vec3(1.0)), mix(alpha, 1.0, fog));
+            }
+            """;
+
+    /** Flat quads lying on the water: wake foam (noisy white) and blob shadows (dark). */
+    private static final String PART_VS = """
+            uniform mat4 uVP;
+            attribute vec3 aPos;
+            attribute vec3 aExtra;
+            varying vec3 vExtra;
+            varying vec2 vXZ;
+            void main() {
+              vExtra = aExtra;
+              vXZ = aPos.xz;
+              gl_Position = uVP * vec4(aPos, 1.0);
+            }
+            """;
+
+    private static final String PART_FS = FS_HEADER + """
+            uniform vec3 uPColor;
+            uniform float uNoiseAmt;
+            uniform sampler2D uNoise;
+            varying vec3 vExtra;
+            varying vec2 vXZ;
+            void main() {
+              float d = length(vExtra.xy);
+              float shape = 1.0 - smoothstep(0.3, 1.0, d);
+              float nz = texture2D(uNoise, vXZ * 0.9).r;
+              float a = shape * vExtra.z * mix(1.0, smoothstep(0.25, 0.7, nz) * 2.6, uNoiseAmt);
+              gl_FragColor = vec4(uPColor, clamp(a, 0.0, 1.0));
+            }
+            """;
 
     // ------------------------------------------------------------------ state
 
     private final Game game;
     private Scenery scene;
-    private int litProg, waterProg, partProg;
-    private int lPos, lNormal, lColor, uMVP, uModel, uLight, uCam, uFogDensity, uLit, uTint, uFogColor;
-    private int wPos, wVP, wTime, wTimeF, wCam, wLight, wFogColor, wFogDensity;
-    private int pPos, pExtra, pVP;
+    private int litProg, skyProg, waterProg, partProg;
+    private int lPos, lNormal, lColor, uMVP, uModel, uTint, uLight, uCam, uFogColor, uFogDensity,
+            uSpec, uShine, uDetail, uClip, uAlpha, uNoiseL;
+    private int sPos, sMVP, sLight, sFogColor, sTime, sNoise;
+    private int wPos, wVP, wTime, wTimeF, wCam, wLight, wFogColor, wFogDensity, wScreen,
+            wReflect, wNormalMap, wDepth, wNoise;
+    private int pPos, pExtra, pVP, pColor, pNoiseAmt, pNoise;
+
+    private int texNoise, texWaterNormals, texDepthIsland, texDepthNoIsland, texBlack;
+    private int reflFbo, reflTex, reflDepth, reflW, reflH;
+    private boolean reflOk;
+    private int screenW = 1, screenH = 1;
 
     private final float[] proj = new float[16], view = new float[16], vp = new float[16];
+    private final float[] viewRefl = new float[16], vpRefl = new float[16];
+    private float[] curVP = vp;
     private final float[] model = new float[16], mvp = new float[16];
     private final float[] cam = new float[11];
     private float aspect = 1.6f;
     private long lastNanos;
 
-    private static final float FOG_DENSITY = 0.0036f;
+    private static final float FOG_DENSITY = 0.0030f;
 
     // per-frame copies made while holding the game lock
     private final float[][] boatM = new float[Game.COLORS.length][16];
     private final int[] boatColor = new int[Game.COLORS.length];
     private final int[] boatHull = new int[Game.COLORS.length];
+    private final float[][] boatPose = new float[Game.COLORS.length][3];  // x, z, heading
     private final float[][] figure = new float[Game.COLORS.length][4];   // x, y, z, yaw (deg)
     private final boolean[] figureVisible = new boolean[Game.COLORS.length];
     private Track track;
@@ -157,12 +277,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private boolean showMarker;
     private float time;
     private float[] wobble = new float[0];
-    private final FloatBuffer partBuf;
-    private int partVerts;
+    private final FloatBuffer partBuf, shadowBuf;
+    private int partVerts, shadowVerts;
 
     GameRenderer(Game game) {
         this.game = game;
         partBuf = ByteBuffer.allocateDirect(game.particles.max * 6 * 6 * 4)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        shadowBuf = ByteBuffer.allocateDirect((Game.COLORS.length + 200) * 6 * 6 * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
     }
 
@@ -174,12 +296,25 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         lColor = GLES20.glGetAttribLocation(litProg, "aColor");
         uMVP = GLES20.glGetUniformLocation(litProg, "uMVP");
         uModel = GLES20.glGetUniformLocation(litProg, "uModel");
+        uTint = GLES20.glGetUniformLocation(litProg, "uTint");
         uLight = GLES20.glGetUniformLocation(litProg, "uLight");
         uCam = GLES20.glGetUniformLocation(litProg, "uCam");
-        uFogDensity = GLES20.glGetUniformLocation(litProg, "uFogDensity");
-        uLit = GLES20.glGetUniformLocation(litProg, "uLit");
-        uTint = GLES20.glGetUniformLocation(litProg, "uTint");
         uFogColor = GLES20.glGetUniformLocation(litProg, "uFogColor");
+        uFogDensity = GLES20.glGetUniformLocation(litProg, "uFogDensity");
+        uSpec = GLES20.glGetUniformLocation(litProg, "uSpec");
+        uShine = GLES20.glGetUniformLocation(litProg, "uShine");
+        uDetail = GLES20.glGetUniformLocation(litProg, "uDetail");
+        uClip = GLES20.glGetUniformLocation(litProg, "uClip");
+        uAlpha = GLES20.glGetUniformLocation(litProg, "uAlpha");
+        uNoiseL = GLES20.glGetUniformLocation(litProg, "uNoise");
+
+        skyProg = program(SKY_VS, SKY_FS);
+        sPos = GLES20.glGetAttribLocation(skyProg, "aPos");
+        sMVP = GLES20.glGetUniformLocation(skyProg, "uMVP");
+        sLight = GLES20.glGetUniformLocation(skyProg, "uLight");
+        sFogColor = GLES20.glGetUniformLocation(skyProg, "uFogColor");
+        sTime = GLES20.glGetUniformLocation(skyProg, "uTimeS");
+        sNoise = GLES20.glGetUniformLocation(skyProg, "uNoise");
 
         waterProg = program(WATER_VS, WATER_FS);
         wPos = GLES20.glGetAttribLocation(waterProg, "aPos");
@@ -190,11 +325,27 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         wLight = GLES20.glGetUniformLocation(waterProg, "uLight");
         wFogColor = GLES20.glGetUniformLocation(waterProg, "uFogColor");
         wFogDensity = GLES20.glGetUniformLocation(waterProg, "uFogDensity");
+        wScreen = GLES20.glGetUniformLocation(waterProg, "uScreen");
+        wReflect = GLES20.glGetUniformLocation(waterProg, "uReflect");
+        wNormalMap = GLES20.glGetUniformLocation(waterProg, "uNormalMap");
+        wDepth = GLES20.glGetUniformLocation(waterProg, "uDepth");
+        wNoise = GLES20.glGetUniformLocation(waterProg, "uNoise");
 
         partProg = program(PART_VS, PART_FS);
         pPos = GLES20.glGetAttribLocation(partProg, "aPos");
         pExtra = GLES20.glGetAttribLocation(partProg, "aExtra");
         pVP = GLES20.glGetUniformLocation(partProg, "uVP");
+        pColor = GLES20.glGetUniformLocation(partProg, "uPColor");
+        pNoiseAmt = GLES20.glGetUniformLocation(partProg, "uNoiseAmt");
+        pNoise = GLES20.glGetUniformLocation(partProg, "uNoise");
+
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
+        texNoise = texture(TextureGen.noise(), TextureGen.NOISE_N, GLES20.GL_LUMINANCE, true);
+        texWaterNormals = texture(TextureGen.waterNormals(), TextureGen.WATER_N, GLES20.GL_RGB, true);
+        texDepthIsland = texture(TextureGen.depth(true), TextureGen.DEPTH_N, GLES20.GL_LUMINANCE, false);
+        texDepthNoIsland = texture(TextureGen.depth(false), TextureGen.DEPTH_N, GLES20.GL_LUMINANCE, false);
+        texBlack = texture(new byte[]{(byte) 190, (byte) 205, (byte) 225}, 1, GLES20.GL_RGB, false);
+        reflFbo = 0;
 
         scene = new Scenery(game);
         java.util.Arrays.fill(gates, null);
@@ -209,8 +360,42 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     @Override
     public void onSurfaceChanged(GL10 unused, int width, int height) {
-        GLES20.glViewport(0, 0, width, height);
-        aspect = height > 0 ? (float) width / height : 1f;
+        screenW = Math.max(1, width);
+        screenH = Math.max(1, height);
+        GLES20.glViewport(0, 0, screenW, screenH);
+        aspect = (float) screenW / screenH;
+        createReflectionTarget(Math.max(1, screenW / 2), Math.max(1, screenH / 2));
+    }
+
+    private void createReflectionTarget(int w, int h) {
+        if (reflFbo != 0) {
+            GLES20.glDeleteFramebuffers(1, new int[]{reflFbo}, 0);
+            GLES20.glDeleteTextures(1, new int[]{reflTex}, 0);
+            GLES20.glDeleteRenderbuffers(1, new int[]{reflDepth}, 0);
+        }
+        reflW = w;
+        reflH = h;
+        int[] id = new int[1];
+        GLES20.glGenTextures(1, id, 0);
+        reflTex = id[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, reflTex);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA,
+                GLES20.GL_UNSIGNED_BYTE, null);
+        setParams(false, false);
+        GLES20.glGenRenderbuffers(1, id, 0);
+        reflDepth = id[0];
+        GLES20.glBindRenderbuffer(GLES20.GL_RENDERBUFFER, reflDepth);
+        GLES20.glRenderbufferStorage(GLES20.GL_RENDERBUFFER, GLES20.GL_DEPTH_COMPONENT16, w, h);
+        GLES20.glGenFramebuffers(1, id, 0);
+        reflFbo = id[0];
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, reflFbo);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, reflTex, 0);
+        GLES20.glFramebufferRenderbuffer(GLES20.GL_FRAMEBUFFER, GLES20.GL_DEPTH_ATTACHMENT,
+                GLES20.GL_RENDERBUFFER, reflDepth);
+        reflOk = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE;
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        if (!reflOk) Log.w(TAG, "Reflection framebuffer unsupported; reflections disabled");
     }
 
     @Override
@@ -232,6 +417,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 b.modelMatrix(boatM[i], time);
                 boatColor[i] = b.id;
                 boatHull[i] = b.hull;
+                boatPose[i][0] = b.x;
+                boatPose[i][1] = b.z;
+                boatPose[i][2] = b.heading;
                 // the RC drivers on the platform turn to watch their boats
                 float fx = game.driverX[i], fz = game.driverZ;
                 figure[i][0] = fx;
@@ -250,50 +438,86 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             System.arraycopy(game.buoyWobble, 0, wobble, 0, wobble.length);
             fillParticles(game.particles);
         }
+        if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
+        fillShadows();
 
         Matrix.perspectiveM(proj, 0, cam[9], aspect, cam[10], 700f);
         Matrix.setLookAtM(view, 0, cam[0], cam[1], cam[2], cam[3], cam[4], cam[5], cam[6], cam[7], cam[8]);
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0);
 
+        // ---- pass 1: the scene mirrored in the water plane, into the reflection texture ----
+        if (reflOk) {
+            Matrix.scaleM(viewRefl, 0, view, 0, 1f, -1f, 1f);
+            Matrix.multiplyMM(vpRefl, 0, proj, 0, viewRefl, 0);
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, reflFbo);
+            GLES20.glViewport(0, 0, reflW, reflH);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+            curVP = vpRefl;
+            drawScene(cam[0], -cam[1], cam[2], true);
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            GLES20.glViewport(0, 0, screenW, screenH);
+        }
+
+        // ---- pass 2: the real view ----
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+        curVP = vp;
+        drawScene(cam[0], cam[1], cam[2], false);
+        drawWater();
+        drawFlat(shadowBuf, shadowVerts, 0.0f, 0.03f, 0.05f, 0f);
+        drawFlat(partBuf, partVerts, 0.94f, 0.97f, 1.0f, 1f);
+        GLES20.glDepthMask(true);
+        GLES20.glDisable(GLES20.GL_BLEND);
+    }
 
-        // ---- lit geometry ----
-        GLES20.glUseProgram(litProg);
-        GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
-        GLES20.glUniform3f(uCam, cam[0], cam[1], cam[2]);
-        GLES20.glUniform3f(uFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
-
-        // sky (follows the camera, no depth write, no fog, unlit)
+    /** Sky and all solid geometry. When reflecting, geometry below the water is clipped. */
+    private void drawScene(float cx, float cy, float cz, boolean reflection) {
+        // sky dome follows the camera
+        GLES20.glUseProgram(skyProg);
         GLES20.glDepthMask(false);
         Matrix.setIdentityM(model, 0);
         Matrix.translateM(model, 0, cam[0], cam[1] * 0.2f, cam[2]);
-        GLES20.glUniform1f(uFogDensity, 0f);
-        GLES20.glUniform1f(uLit, 0f);
-        drawLit(scene.sky, 1, 1, 1, 1);
+        Matrix.multiplyMM(mvp, 0, curVP, 0, model, 0);
+        GLES20.glUniformMatrix4fv(sMVP, 1, false, mvp, 0);
+        GLES20.glUniform3f(sLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
+        GLES20.glUniform3f(sFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
+        GLES20.glUniform1f(sTime, time);
+        bindTex(0, texNoise, sNoise);
+        scene.sky.draw(sPos, -1, -1);
+        GLES20.glDisableVertexAttribArray(sPos);
         GLES20.glDepthMask(true);
 
+        GLES20.glUseProgram(litProg);
+        GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
+        GLES20.glUniform3f(uCam, cx, cy, cz);
+        GLES20.glUniform3f(uFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
         GLES20.glUniform1f(uFogDensity, FOG_DENSITY);
-        GLES20.glUniform1f(uLit, 1f);
+        GLES20.glUniform1f(uClip, reflection ? 1f : 0f);
+        GLES20.glUniform1f(uAlpha, 1f);
+        bindTex(0, texNoise, uNoiseL);
+
         Matrix.setIdentityM(model, 0);
-        drawLit(scene.terrain, 1, 1, 1, 1);
-        drawLit(scene.props, 1, 1, 1, 1);
-        if (islandOn) {
-            drawLit(scene.island, 1, 1, 1, 1);
-            drawLit(scene.islandProps, 1, 1, 1, 1);
-        }
-        if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
-        drawLit(gates[track.id], 1, 1, 1, 1);
+        material(0.05f, 8f, true);
+        drawLit(scene.terrain);
+        if (islandOn) drawLit(scene.island);
+        material(0.1f, 16f, false);
+        GLES20.glUniform1f(uDetail, 2f);
+        drawLit(scene.props);
+        if (islandOn) drawLit(scene.islandProps);
+        material(0.35f, 40f, false);
+        drawLit(gates[track.id]);
 
         // RC drivers on the platform
+        material(0.15f, 12f, false);
         for (int i = 0; i < boatCount; i++) {
             if (!figureVisible[i]) continue;
             Matrix.setIdentityM(model, 0);
             Matrix.translateM(model, 0, figure[i][0], figure[i][1], figure[i][2]);
             Matrix.rotateM(model, 0, figure[i][3], 0, 1, 0);
-            drawLit(scene.figures[boatColor[i]], 1, 1, 1, 1);
+            drawLit(scene.figures[boatColor[i]]);
         }
 
         // buoys
+        material(0.7f, 60f, false);
         java.util.ArrayList<float[]> buoys = track.buoys;
         for (int i = 0; i < buoys.size(); i++) {
             float[] bu = buoys.get(i);
@@ -303,17 +527,18 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             Matrix.translateM(model, 0, bu[0], wy, bu[1]);
             float tilt = (float) Math.sin(time * 1.3f + i) * 4f + w * 25f * (float) Math.sin(time * 9f + i);
             Matrix.rotateM(model, 0, tilt, (float) Math.cos(i), 0, (float) Math.sin(i));
-            drawLit(bu[2] == 0 ? scene.buoyRed : scene.buoyYellow, 1, 1, 1, 1);
+            drawLit(bu[2] == 0 ? scene.buoyRed : scene.buoyYellow);
         }
 
-        // boats
+        // boats: glossy gelcoat
+        material(0.9f, 90f, false);
         for (int i = 0; i < boatCount; i++) {
             System.arraycopy(boatM[i], 0, model, 0, 16);
-            drawLit(scene.boats[boatHull[i]][boatColor[i]], 1, 1, 1, 1);
+            drawLit(scene.boats[boatHull[i]][boatColor[i]]);
         }
 
         // "this is you" marker above the player's boat (shore view only)
-        if (showMarker) {
+        if (showMarker && !reflection) {
             float dx = markerPos[0] - cam[0], dz = markerPos[2] - cam[2];
             float d = (float) Math.sqrt(dx * dx + dz * dz);
             float s = Math.max(0.5f, d / 30f);
@@ -322,10 +547,12 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                     + 0.08f * s * (float) Math.sin(time * 4f), markerPos[2]);
             Matrix.scaleM(model, 0, s, s, s);
             Matrix.rotateM(model, 0, time * 90f, 0, 1, 0);
-            drawLit(scene.marker, 1, 1, 1, 1);
+            material(0.5f, 30f, false);
+            drawLit(scene.marker);
         }
+    }
 
-        // ---- water (transparent) ----
+    private void drawWater() {
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glDepthMask(false);
         GLES20.glUseProgram(waterProg);
@@ -336,32 +563,47 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform3f(wLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(wFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
         GLES20.glUniform1f(wFogDensity, FOG_DENSITY);
+        GLES20.glUniform2f(wScreen, screenW, screenH);
+        bindTex(0, texNoise, wNoise);
+        bindTex(1, texWaterNormals, wNormalMap);
+        bindTex(2, islandOn ? texDepthIsland : texDepthNoIsland, wDepth);
+        bindTex(3, reflOk ? reflTex : texBlack, wReflect);
         scene.water.draw(wPos, -1, -1);
         GLES20.glDisableVertexAttribArray(wPos);
-
-        // ---- wake foam ----
-        if (partVerts > 0) {
-            GLES20.glUseProgram(partProg);
-            GLES20.glUniformMatrix4fv(pVP, 1, false, vp, 0);
-            partBuf.position(0);
-            GLES20.glEnableVertexAttribArray(pPos);
-            GLES20.glVertexAttribPointer(pPos, 3, GLES20.GL_FLOAT, false, 24, partBuf);
-            partBuf.position(3);
-            GLES20.glEnableVertexAttribArray(pExtra);
-            GLES20.glVertexAttribPointer(pExtra, 3, GLES20.GL_FLOAT, false, 24, partBuf);
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, partVerts);
-            GLES20.glDisableVertexAttribArray(pPos);
-            GLES20.glDisableVertexAttribArray(pExtra);
-        }
-        GLES20.glDepthMask(true);
-        GLES20.glDisable(GLES20.GL_BLEND);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
     }
 
-    private void drawLit(Mesh m, float r, float g, float b, float a) {
-        Matrix.multiplyMM(mvp, 0, vp, 0, model, 0);
+    /** Flat quads on the water (shadows or foam); expects blending on and depth writes off. */
+    private void drawFlat(FloatBuffer buf, int verts, float r, float g, float b, float noiseAmt) {
+        if (verts <= 0) return;
+        GLES20.glUseProgram(partProg);
+        GLES20.glUniformMatrix4fv(pVP, 1, false, vp, 0);
+        GLES20.glUniform3f(pColor, r, g, b);
+        GLES20.glUniform1f(pNoiseAmt, noiseAmt);
+        bindTex(0, texNoise, pNoise);
+        buf.position(0);
+        GLES20.glEnableVertexAttribArray(pPos);
+        GLES20.glVertexAttribPointer(pPos, 3, GLES20.GL_FLOAT, false, 24, buf);
+        buf.position(3);
+        GLES20.glEnableVertexAttribArray(pExtra);
+        GLES20.glVertexAttribPointer(pExtra, 3, GLES20.GL_FLOAT, false, 24, buf);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, verts);
+        GLES20.glDisableVertexAttribArray(pPos);
+        GLES20.glDisableVertexAttribArray(pExtra);
+        buf.position(0);
+    }
+
+    private void material(float spec, float shine, boolean detail) {
+        GLES20.glUniform1f(uSpec, spec);
+        GLES20.glUniform1f(uShine, shine);
+        GLES20.glUniform1f(uDetail, detail ? 1f : 0f);
+    }
+
+    private void drawLit(Mesh m) {
+        Matrix.multiplyMM(mvp, 0, curVP, 0, model, 0);
         GLES20.glUniformMatrix4fv(uMVP, 1, false, mvp, 0);
         GLES20.glUniformMatrix4fv(uModel, 1, false, model, 0);
-        GLES20.glUniform4f(uTint, r, g, b, a);
+        GLES20.glUniform3f(uTint, 1f, 1f, 1f);
         m.draw(lPos, lNormal, lColor);
         GLES20.glDisableVertexAttribArray(lPos);
         GLES20.glDisableVertexAttribArray(lNormal);
@@ -376,23 +618,77 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             if (a < 0.01f) continue;
             float x = p.x[i], z = p.z[i];
             float y = World.wave(x, z, time) + 0.05f;
-            put(x - s, y, z - s, -1, -1, a);
-            put(x + s, y, z - s, 1, -1, a);
-            put(x + s, y, z + s, 1, 1, a);
-            put(x - s, y, z - s, -1, -1, a);
-            put(x + s, y, z + s, 1, 1, a);
-            put(x - s, y, z + s, -1, 1, a);
+            quad(partBuf, x, y, z, s, 0f, 0f, s, a);
             v += 6;
         }
         partVerts = v;
         partBuf.position(0);
     }
 
-    private void put(float x, float y, float z, float u, float w, float a) {
-        partBuf.put(x).put(y).put(z).put(u).put(w).put(a);
+    /** Soft dark ellipses under the boats and buoys, nudged away from the sun. */
+    private void fillShadows() {
+        shadowBuf.position(0);
+        int v = 0;
+        float sx = -Scenery.LIGHT[0] / Scenery.LIGHT[1], sz = -Scenery.LIGHT[2] / Scenery.LIGHT[1];
+        for (int i = 0; i < boatCount; i++) {
+            float x = boatPose[i][0] + sx * 0.15f, z = boatPose[i][1] + sz * 0.15f, hd = boatPose[i][2];
+            float fx = (float) -Math.sin(hd), fz = (float) -Math.cos(hd);
+            float y = World.wave(x, z, time) + 0.04f;
+            // half-length along the hull, half-width across it
+            quad(shadowBuf, x, y, z, fx * 0.85f, fz * 0.85f, -fz * 0.42f, fx * 0.42f, 0.5f);
+            v += 6;
+        }
+        java.util.ArrayList<float[]> buoys = track.buoys;
+        for (int i = 0; i < buoys.size() && v / 6 < Game.COLORS.length + 200; i++) {
+            float[] bu = buoys.get(i);
+            float x = bu[0] + sx * 0.3f, z = bu[1] + sz * 0.3f;
+            quad(shadowBuf, x, World.wave(x, z, time) + 0.04f, z, 0.6f, 0f, 0f, 0.6f, 0.38f);
+            v += 6;
+        }
+        shadowVerts = v;
+        shadowBuf.position(0);
+    }
+
+    /** A flat quad centred at (x, y, z) spanned by axes (ax, az) and (bx, bz). */
+    private static void quad(FloatBuffer buf, float x, float y, float z, float ax, float az,
+                             float bx, float bz, float a) {
+        float[][] c = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+        for (float[] k : c) {
+            buf.put(x + ax * k[0] + bx * k[1]).put(y).put(z + az * k[0] + bz * k[1])
+                    .put(k[0]).put(k[1]).put(a);
+        }
     }
 
     // ------------------------------------------------------------------ GL helpers
+
+    private static void bindTex(int unit, int tex, int uniform) {
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex);
+        GLES20.glUniform1i(uniform, unit);
+    }
+
+    private static void setParams(boolean repeat, boolean mipmap) {
+        int wrap = repeat ? GLES20.GL_REPEAT : GLES20.GL_CLAMP_TO_EDGE;
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrap);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrap);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER,
+                mipmap ? GLES20.GL_LINEAR_MIPMAP_LINEAR : GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+    }
+
+    /** Uploads a square texture; repeating textures get mipmaps. */
+    private static int texture(byte[] data, int size, int format, boolean repeat) {
+        int[] id = new int[1];
+        GLES20.glGenTextures(1, id, 0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id[0]);
+        ByteBuffer bb = ByteBuffer.allocateDirect(data.length).order(ByteOrder.nativeOrder());
+        bb.put(data).position(0);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, format, size, size, 0, format,
+                GLES20.GL_UNSIGNED_BYTE, bb);
+        setParams(repeat, repeat);
+        if (repeat) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D);
+        return id[0];
+    }
 
     private static int shader(int type, String src) {
         int s = GLES20.glCreateShader(type);

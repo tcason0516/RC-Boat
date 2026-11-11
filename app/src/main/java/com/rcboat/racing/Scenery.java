@@ -4,12 +4,15 @@ import java.util.Random;
 
 /** Builds all the meshes of the scene. Must be called on the GL thread. */
 final class Scenery {
-    static final float[] LIGHT = normalize(-0.42f, 0.70f, 0.58f);
-    static final float[] FOG = {0.76f, 0.85f, 0.93f};
+    /** Sun direction; matches the sun in the photographed sky panorama (assets/tex/sky.jpg). */
+    static final float[] LIGHT = normalize(-0.3941f, 0.7406f, 0.5442f);
+    /** Haze colour (before tone mapping); matches the horizon of the sky panorama. */
+    static final float[] FOG = {0.494f, 0.521f, 0.615f};
 
     Mesh sky, terrain, water, props, island, islandProps, buoyRed, buoyYellow, marker;
     Mesh foliage, islandFoliage;   // alpha-tested cards (trees near the lake, grass, reeds)
-    private MeshBuilder foliageB, islandFoliageB;
+    Mesh bark, wood, rocks, islandBark;   // photo-textured (triplanar): tree trunks, platform timber, boulders
+    private MeshBuilder foliageB, islandFoliageB, barkB, woodB, rocksB, islandBarkB;
     Mesh[][] boats;     // [hull][color]
     Mesh[] figures;     // RC drivers, one per color
 
@@ -19,6 +22,10 @@ final class Scenery {
         water = buildWater();
         foliageB = new MeshBuilder();
         islandFoliageB = new MeshBuilder();
+        barkB = new MeshBuilder();
+        woodB = new MeshBuilder();
+        rocksB = new MeshBuilder();
+        islandBarkB = new MeshBuilder();
         props = buildProps(game);
         buoyRed = buildBuoy(0.95f, 0.18f, 0.12f);
         buoyYellow = buildBuoy(1.0f, 0.78f, 0.08f);
@@ -27,7 +34,11 @@ final class Scenery {
         islandProps = buildIslandProps();
         foliage = foliageB.build();
         islandFoliage = islandFoliageB.build();
-        foliageB = islandFoliageB = null;
+        bark = barkB.build();
+        wood = woodB.build();
+        rocks = rocksB.build();
+        islandBark = islandBarkB.build();
+        foliageB = islandFoliageB = barkB = woodB = rocksB = islandBarkB = null;
         boats = new Mesh[Boat.HULL_NAMES.length][Game.COLORS.length];
         figures = new Mesh[Game.COLORS.length];
         for (int i = 0; i < Game.COLORS.length; i++) {
@@ -90,28 +101,23 @@ final class Scenery {
         return new float[]{a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
     }
 
-    /** Ground colour from position, height and surface steepness (ny = normal's up component). */
+    /**
+     * Terrain texture blend weights, stored in the vertex colour slot:
+     * r = sand, g = rock, b = which grass (0 meadow .. 1 dark lush). The shader adds the
+     * wet band at the waterline and the pebbly lake bed from the height.
+     */
     private static float[] groundColor(float x, float z, float h, float ny) {
         float q = World.lakeQ(x, z);
         float ix = (x - World.ISLAND_X) / World.ISLAND_RX, iz = (z - World.ISLAND_Z) / World.ISLAND_RZ;
         boolean nearWater = q < 1.2f || (ix * ix + iz * iz) < 1f;
-        float n = noise(x, z);
-        float patch = noise(x * 0.23f + 40f, z * 0.23f - 17f);       // large meadow patches
-        float[] lush = {0.26f + 0.04f * n, 0.42f + 0.06f * n, 0.16f + 0.02f * n};
-        float[] dry = {0.50f + 0.04f * n, 0.48f + 0.04f * n, 0.28f};
-        float[] grass = mix(lush, dry, (patch - 0.15f) * 1.4f);
-        float[] rock = {0.42f + 0.05f * n, 0.40f + 0.05f * n, 0.36f + 0.04f * n};
-        float[] sand = {0.78f, 0.71f, 0.52f};
-        float[] wet = {0.52f, 0.46f, 0.33f};
-        float[] silt = {0.20f, 0.24f, 0.18f};
-        if (h > 19f) grass = mix(grass, rock, (h - 19f) / 8f);
-        // steep slopes show rock and dirt
-        grass = mix(grass, rock, (0.86f - ny) * 6f);
-        if (h < -0.05f) return mix(mix(wet, sand, 0.3f), silt, -h / 2.2f);
-        if (!nearWater) return grass;
-        if (h < 0.22f) return mix(wet, sand, (h + 0.05f) / 0.27f);
-        if (h < 0.6f) return sand;
-        return mix(sand, grass, (h - 0.6f) / 0.6f);
+        float patch = noise(x * 0.23f + 40f, z * 0.23f - 17f);
+        float sand = 0f;
+        if (h < 0.6f) sand = (nearWater || h < 0f) ? 1f : 0f;
+        else if (nearWater) sand = Math.max(0f, 1f - (h - 0.6f) / 0.6f);
+        float rock = Math.max(0f, Math.min(1f, (0.9f - ny) * 7f));
+        if (h > 26f) rock = Math.max(rock, Math.min(1f, (h - 26f) / 10f));
+        float lush = Math.max(0f, Math.min(1f, 0.5f - patch * 0.9f));
+        return new float[]{sand, rock, lush};
     }
 
     private Mesh buildTerrain() {
@@ -187,8 +193,8 @@ final class Scenery {
             if (World.lakeQ(x, z) < 1.1f) continue;
             if (Math.abs(x) < 12f && z > shoreZ - 4f && z < shoreZ + 20f) continue;
             float sz = 0.8f + rnd.nextFloat() * 0.9f;
-            if (World.lakeQ(x, z) < 1.9f) nearTree(mb, foliageB, rnd, x, h, z, sz);
-            else tree(mb, rnd, x, h, z, sz);
+            if (World.lakeQ(x, z) < 1.9f) nearTree(mb, barkB, foliageB, rnd, x, h, z, sz);
+            else tree(mb, barkB, rnd, x, h, z, sz);
             placed++;
         }
         shorePlants(foliageB, rnd, game);
@@ -203,10 +209,11 @@ final class Scenery {
             if (Math.abs(x) < 10f && z > 0) continue;
             float s = 0.4f + rnd.nextFloat() * 0.9f;
             float g = 0.45f + rnd.nextFloat() * 0.15f;
-            mb.sphere(x, World.baseHeight(x, z), z, s * 1.3f, s * 0.7f, s, 7, 4, g, g * 0.98f, g * 0.92f);
+            rocksB.lumpySphere(x, World.baseHeight(x, z), z, s * 1.3f, s * 0.7f, s, 9, 6, rnd.nextInt(),
+                    g * 2f, g * 2f, g * 1.95f);
         }
 
-        platform(mb, game);
+        platform(mb, woodB, game);
 
         // boathouses on the shore
         house(mb, 30f, shoreZ - 3f, 0.4f);
@@ -215,35 +222,36 @@ final class Scenery {
     }
 
     /** The 5 ft (1.52 m) drivers' platform on the south shore. */
-    private static void platform(MeshBuilder mb, Game game) {
+    private static void platform(MeshBuilder mb, MeshBuilder wood, Game game) {
         float w = Game.PLATFORM_W, d = Game.PLATFORM_D;
         float cz = game.platformZ, top = game.deckY, ground = game.groundY;
         float front = cz - d / 2f, back = cz + d / 2f;
-        float wr = 0.58f, wg = 0.43f, wb = 0.28f;      // planks
-        float pr = 0.45f, pg = 0.33f, pb = 0.22f;      // posts
+        // timber goes into the photo-textured wood mesh; these are tints over the plank texture
+        float wr = 1.75f, wg = 1.62f, wb = 1.5f;       // sun-bleached deck planks
+        float pr = 1.2f, pg = 1.12f, pb = 1.05f;       // posts
         // deck
-        mb.box(0, top - 0.08f, cz, w, 0.16f, d, 0, wr, wg, wb);
+        wood.box(0, top - 0.08f, cz, w, 0.16f, d, 0, wr, wg, wb);
         // support posts and braces
         for (float x = -w / 2 + 0.15f; x <= w / 2; x += (w - 0.3f) / 4f) {
             for (float z : new float[]{front + 0.15f, back - 0.15f}) {
                 float base = ground - 0.6f;
-                mb.box(x, (base + top - 0.16f) / 2f, z, 0.18f, top - 0.16f - base, 0.18f, 0, pr, pg, pb);
+                wood.box(x, (base + top - 0.16f) / 2f, z, 0.18f, top - 0.16f - base, 0.18f, 0, pr, pg, pb);
             }
-            mb.box(x, ground + 0.5f, cz, 0.1f, 0.1f, d - 0.3f, 0, pr, pg, pb);
+            wood.box(x, ground + 0.5f, cz, 0.1f, 0.1f, d - 0.3f, 0, pr, pg, pb);
         }
-        mb.box(0, ground + 0.6f, front + 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
-        mb.box(0, ground + 0.6f, back - 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
+        wood.box(0, ground + 0.6f, front + 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
+        wood.box(0, ground + 0.6f, back - 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
         // safety railing on the front and sides
         float rail = 1.0f;
         for (float x = -w / 2 + 0.05f; x <= w / 2; x += (w - 0.1f) / 8f) {
-            mb.box(x, top + rail / 2f, front + 0.05f, 0.07f, rail, 0.07f, 0, pr, pg, pb);
+            wood.box(x, top + rail / 2f, front + 0.05f, 0.07f, rail, 0.07f, 0, pr, pg, pb);
         }
         mb.box(0, top + rail, front + 0.05f, w, 0.08f, 0.1f, 0, 0.92f, 0.92f, 0.9f);
-        mb.box(0, top + rail * 0.5f, front + 0.05f, w, 0.05f, 0.05f, 0, pr, pg, pb);
+        wood.box(0, top + rail * 0.5f, front + 0.05f, w, 0.05f, 0.05f, 0, pr, pg, pb);
         for (int s = -1; s <= 1; s += 2) {
             float x = s * (w / 2f - 0.05f);
             for (float z = front; z <= back; z += d / 3f) {
-                mb.box(x, top + rail / 2f, z, 0.07f, rail, 0.07f, 0, pr, pg, pb);
+                wood.box(x, top + rail / 2f, z, 0.07f, rail, 0.07f, 0, pr, pg, pb);
             }
             mb.box(x, top + rail, cz, 0.1f, 0.08f, d, 0, 0.92f, 0.92f, 0.9f);
         }
@@ -253,8 +261,8 @@ final class Scenery {
         for (int i = 0; i < steps; i++) {
             float y = top - rise * (i + 1);
             float z = back + tread * (i + 0.5f);
-            mb.box(0, y + rise / 2f - 0.02f, z, 1.3f, 0.06f, tread, 0, wr, wg, wb);
-            mb.box(0, (ground + y) / 2f, z + tread / 2f - 0.04f, 1.1f, Math.max(0.05f, y - ground), 0.05f, 0,
+            wood.box(0, y + rise / 2f - 0.02f, z, 1.3f, 0.06f, tread, 0, wr, wg, wb);
+            wood.box(0, (ground + y) / 2f, z + tread / 2f - 0.04f, 1.1f, Math.max(0.05f, y - ground), 0.05f, 0,
                     pr, pg, pb);
         }
         // a sign board below the front rail
@@ -307,7 +315,7 @@ final class Scenery {
         float[][] islandTrees = {{-7, -3}, {-9, 0}, {6, -4}, {8, 0}, {-3, 2}, {4, 2.5f}, {-12, -2}, {11, -1}};
         for (float[] t : islandTrees) {
             float h = World.height(t[0], t[1], true);
-            if (h > 0.3f) nearTree(mb, islandFoliageB, rnd, t[0], h, t[1], 0.6f + rnd.nextFloat() * 0.4f);
+            if (h > 0.3f) nearTree(mb, islandBarkB, islandFoliageB, rnd, t[0], h, t[1], 0.6f + rnd.nextFloat() * 0.4f);
         }
         // lighthouse
         float lx = World.ISLAND_X, lz = World.ISLAND_Z;
@@ -380,13 +388,13 @@ final class Scenery {
     }
 
     /** A tree near the lake: solid trunk and dark inner core, textured branch / leaf cards outside. */
-    private static void nearTree(MeshBuilder solid, MeshBuilder fol, Random rnd, float x, float h, float z, float s) {
+    private static void nearTree(MeshBuilder solid, MeshBuilder bk, MeshBuilder fol, Random rnd, float x, float h, float z, float s) {
         float bark = 0.85f + rnd.nextFloat() * 0.3f;
         int seed = rnd.nextInt();
         if (rnd.nextFloat() < 0.62f) {
             s *= 1.1f + rnd.nextFloat() * 0.25f;
             float H = 6.6f * s, y0 = h + 0.7f * s, R = 1.9f * s;
-            solid.cylinder(x, h - 0.2f, z, 0.2f * s, 0.06f * s, H + 0.3f, 6, 0.33f * bark, 0.23f * bark, 0.15f * bark, false);
+            bk.cylinder(x, h - 0.2f, z, 0.2f * s, 0.06f * s, H + 0.3f, 8, bark, bark * 0.95f, bark * 0.9f, false);
             solid.foliageCone(x, y0 + 0.3f * s, z, R * 0.55f, H * 0.82f, 8, seed, 0.035f, 0.08f, 0.04f);
             int tiers = 10;
             float spin = rnd.nextFloat() * 6.28f;
@@ -429,7 +437,7 @@ final class Scenery {
             }
         } else {
             float g = 0.85f + rnd.nextFloat() * 0.3f;
-            solid.cylinder(x, h - 0.2f, z, 0.24f * s, 0.14f * s, 2.6f * s, 6, 0.36f * bark, 0.27f * bark, 0.18f * bark, false);
+            bk.cylinder(x, h - 0.2f, z, 0.24f * s, 0.14f * s, 2.6f * s, 8, bark * 1.1f, bark * 1.05f, bark, false);
             float[][] blobs = {
                     {0, 2.7f, 0, 1.8f, 1.45f, 34},
                     {0.8f, 3.4f, -0.3f, 1.2f, 1.05f, 18},
@@ -539,14 +547,14 @@ final class Scenery {
         return r;
     }
 
-    private static void tree(MeshBuilder mb, Random rnd, float x, float h, float z, float s) {
+    private static void tree(MeshBuilder mb, MeshBuilder bk, Random rnd, float x, float h, float z, float s) {
         float bark = 0.85f + rnd.nextFloat() * 0.3f;
         float g = 0.8f + rnd.nextFloat() * 0.35f;
         int seed = rnd.nextInt();
         if (rnd.nextFloat() < 0.62f) {
             // conifer: four irregular, drooping tiers
             s *= 1.1f + rnd.nextFloat() * 0.25f;
-            mb.cylinder(x, h - 0.2f, z, 0.2f * s, 0.12f * s, 1.4f * s, 6, 0.33f * bark, 0.23f * bark, 0.15f * bark, false);
+            bk.cylinder(x, h - 0.2f, z, 0.2f * s, 0.12f * s, 1.4f * s, 6, bark, bark * 0.95f, bark * 0.9f, false);
             float[] y0 = {0.7f, 1.9f, 3.0f, 4.0f}, r = {1.75f, 1.4f, 1.05f, 0.65f}, hh = {2.3f, 2.1f, 1.9f, 1.7f};
             for (int t = 0; t < 4; t++) {
                 float k = 0.85f + t * 0.07f;
@@ -555,7 +563,7 @@ final class Scenery {
             }
         } else {
             // broadleaf: lumpy overlapping canopy blobs
-            mb.cylinder(x, h - 0.2f, z, 0.24f * s, 0.16f * s, 2.2f * s, 6, 0.36f * bark, 0.27f * bark, 0.18f * bark, false);
+            bk.cylinder(x, h - 0.2f, z, 0.24f * s, 0.16f * s, 2.2f * s, 6, bark * 1.1f, bark * 1.05f, bark, false);
             float hue = rnd.nextFloat() * 0.06f;
             float cr = (0.19f + hue) * g, cg = 0.37f * g, cb = 0.12f * g;
             mb.lumpySphere(x, h + 2.6f * s, z, 1.7f * s, 1.35f * s, 1.7f * s, 9, 5, seed, cr, cg, cb);

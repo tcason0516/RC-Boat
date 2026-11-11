@@ -89,32 +89,71 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             }
             """;
 
-    private static final String LIT_FS = FS_HEADER + """
+    /** Shared sun/sky lighting, shadow and haze for solid surfaces. */
+    private static final String LIGHT_FN = """
             uniform vec3 uLight;
             uniform vec3 uCam;
             uniform vec3 uFogColor;
             uniform float uFogDensity;
+            uniform float uShadowOn;
+            uniform float uTexel;
+            uniform sampler2D uShadow;
+            varying vec4 vShadow;
+            float sunShadow(vec3 n) {
+              float ndl = max(dot(n, uLight), 0.0);
+              return uShadowOn > 0.5 ? shadowLookup(uShadow, vShadow, 0.0008 + 0.002 * (1.0 - ndl), uTexel) : 1.0;
+            }
+            vec3 lightAndFog(vec3 base, vec3 n, vec3 world, float sh, float specAmt, float shine, float glow) {
+              vec3 v = normalize(uCam - world);
+              float ndl = max(dot(n, uLight), 0.0);
+              vec3 amb = mix(vec3(0.28, 0.26, 0.20), vec3(0.44, 0.56, 0.78), n.y * 0.5 + 0.5) * 0.5;
+              vec3 sun = vec3(1.0, 0.95, 0.85) * ndl * sh;
+              vec3 h = normalize(uLight + v);
+              float spec = specAmt * pow(max(dot(n, h), 0.0), shine) * (0.25 + 0.75 * ndl) * sh;
+              float rim = pow(1.0 - max(dot(n, v), 0.0), 5.0) * specAmt * 0.4;
+              vec3 col = base * (amb + sun) + vec3(1.0, 0.97, 0.9) * spec + amb * rim;
+              // sunlight glowing through leaves when looking towards the sun
+              col += base * vec3(0.9, 1.0, 0.55) * glow * pow(max(dot(-v, uLight), 0.0), 2.0) * sh;
+              float f = length(uCam - world) * uFogDensity;
+              float fog = 1.0 - exp(-f * f);
+              vec3 fogc = mix(uFogColor, vec3(1.0, 0.92, 0.78), pow(max(dot(-v, uLight), 0.0), 6.0) * 0.35);
+              return grade(mix(col, fogc, fog));
+            }
+            """;
+
+    /**
+     * Solid objects. uDetail: 0 = plain vertex colour, 2 = weathered (noise), 3 = foliage
+     * cards from the atlas, 4 = photo texture mapped triplanar in world space (uTex).
+     */
+    private static final String LIT_FS = FS_HEADER + LIGHT_FN + """
             uniform float uSpec;
             uniform float uShine;
             uniform float uDetail;
             uniform float uClip;
             uniform float uAlpha;
-            uniform float uShadowOn;
-            uniform float uTexel;
+            uniform float uTexScale;
             uniform sampler2D uNoise;
             uniform sampler2D uAtlas;
-            uniform sampler2D uShadow;
+            uniform sampler2D uTex;
             varying vec3 vColor;
             varying vec3 vNormal;
             varying vec3 vWorld;
-            varying vec4 vShadow;
             varying float vBright;
             void main() {
               if (uClip > 0.5 && vWorld.y < -0.03) discard;
               vec3 base = vColor;
               float outA = uAlpha;
-              bool leafy = uDetail > 2.5;
-              if (leafy) {
+              vec3 n = normalize(vNormal);
+              bool leafy = uDetail > 2.5 && uDetail < 3.5;
+              if (uDetail > 3.5) {
+                vec3 w = abs(n);
+                w = w * w;
+                w /= (w.x + w.y + w.z);
+                vec3 p = vWorld * uTexScale;
+                vec3 tx = texture2D(uTex, p.zy).rgb * w.x + texture2D(uTex, p.xz).rgb * w.y
+                        + texture2D(uTex, p.xy).rgb * w.z;
+                base = tx * vColor;
+              } else if (leafy) {
                 vec4 tx = texture2D(uAtlas, vColor.rg);
                 if (tx.a < 0.35) discard;
                 base = tx.rgb * vBright * 0.82;
@@ -122,28 +161,49 @@ final class GameRenderer implements GLSurfaceView.Renderer {
               } else if (uDetail > 1.5) {
                 float d3 = texture2D(uNoise, vWorld.xz * 0.9 + vWorld.y * 0.6).r;
                 base *= 0.72 + 0.5 * d3;
-              } else if (uDetail > 0.5) {
-                float d1 = texture2D(uNoise, vWorld.xz * 0.37).r;
-                float d2 = texture2D(uNoise, vWorld.xz * 0.043).r;
-                base *= 0.74 + 0.32 * d1 + 0.3 * (d2 - 0.5);
               }
-              vec3 v = normalize(uCam - vWorld);
+              if (!leafy && dot(n, uCam - vWorld) < 0.0) n = -n;
+              float sh = sunShadow(n);
+              gl_FragColor = vec4(lightAndFog(base, n, vWorld, sh, uSpec, uShine, leafy ? 0.3 : 0.0), outA);
+            }
+            """;
+
+    /**
+     * Terrain: photographed grass, sand, rock and pebble textures blended by per-vertex
+     * weights (vColor = sand, rock, lush-grass), with a wet band at the waterline.
+     */
+    private static final String TERRAIN_FS = FS_HEADER + LIGHT_FN + """
+            uniform float uClip;
+            uniform sampler2D uNoise;
+            uniform sampler2D uGrassA;
+            uniform sampler2D uGrassB;
+            uniform sampler2D uSand;
+            uniform sampler2D uRock;
+            uniform sampler2D uPebble;
+            varying vec3 vColor;
+            varying vec3 vNormal;
+            varying vec3 vWorld;
+            void main() {
+              if (uClip > 0.5 && vWorld.y < -0.03) discard;
+              vec2 uv = vWorld.xz;
+              float macro = texture2D(uNoise, uv * 0.011).r;
+              float fine = texture2D(uNoise, uv * 0.37).r;
+              // two scales of the meadow texture hide the repetition
+              vec3 gA = mix(texture2D(uGrassA, uv * 0.23).rgb, texture2D(uGrassA, uv * 0.041).rgb, 0.45);
+              vec3 gB = texture2D(uGrassB, uv * 0.19).rgb;
+              vec3 col = mix(gA, gB, smoothstep(0.3, 0.7, vColor.b + (macro - 0.5) * 0.7));
+              col *= 0.8 + 0.4 * macro;
+              float sandW = smoothstep(0.3, 0.7, vColor.r + (fine - 0.5) * 0.4);
+              float rockW = smoothstep(0.3, 0.7, vColor.g + (fine - 0.5) * 0.4);
+              col = mix(col, texture2D(uSand, uv * 0.17).rgb, sandW);
+              col = mix(col, texture2D(uRock, uv * 0.13).rgb * 0.85, rockW);
+              // damp sand at the waterline, pebbly bed under water
+              col *= mix(0.6, 1.0, smoothstep(-0.02, 0.24, vWorld.y + (fine - 0.5) * 0.08));
+              float bed = 1.0 - smoothstep(-0.8, -0.12, vWorld.y);
+              col = mix(col, texture2D(uPebble, uv * 0.31).rgb * vec3(0.62, 0.68, 0.6), bed);
               vec3 n = normalize(vNormal);
-              if ((uDetail < 0.5 || (uDetail > 1.5 && !leafy)) && dot(n, v) < 0.0) n = -n;
-              float ndl = max(dot(n, uLight), 0.0);
-              float sh = uShadowOn > 0.5 ? shadowLookup(uShadow, vShadow, 0.0008 + 0.002 * (1.0 - ndl), uTexel) : 1.0;
-              vec3 amb = mix(vec3(0.28, 0.26, 0.20), vec3(0.44, 0.56, 0.78), n.y * 0.5 + 0.5) * 0.5;
-              vec3 sun = vec3(1.0, 0.95, 0.85) * 1.0 * ndl * sh;
-              vec3 h = normalize(uLight + v);
-              float spec = uSpec * pow(max(dot(n, h), 0.0), uShine) * (0.25 + 0.75 * ndl) * sh;
-              float rim = pow(1.0 - max(dot(n, v), 0.0), 5.0) * uSpec * 0.4;
-              vec3 col = base * (amb + sun) + vec3(1.0, 0.97, 0.9) * spec + amb * rim;
-              // sunlight glowing through leaves when looking towards the sun
-              if (leafy) col += base * vec3(0.9, 1.0, 0.55) * 0.3 * pow(max(dot(-v, uLight), 0.0), 2.0) * sh;
-              float f = length(uCam - vWorld) * uFogDensity;
-              float fog = 1.0 - exp(-f * f);
-              vec3 fogc = mix(uFogColor, vec3(1.0, 0.92, 0.78), pow(max(dot(-v, uLight), 0.0), 6.0) * 0.35);
-              gl_FragColor = vec4(grade(mix(col, fogc, fog)), outA);
+              float sh = sunShadow(n);
+              gl_FragColor = vec4(lightAndFog(col, n, vWorld, sh, 0.03, 8.0, 0.0), 1.0);
             }
             """;
 
@@ -157,32 +217,18 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             }
             """;
 
+    /** Photographed sky panorama (upper hemisphere), blended into the haze at the horizon. */
     private static final String SKY_FS = FS_HEADER + """
-            uniform vec3 uLight;
             uniform vec3 uFogColor;
-            uniform float uTimeS;
-            uniform sampler2D uNoise;
+            uniform sampler2D uSky;
             varying vec3 vDir;
             void main() {
               vec3 d = normalize(vDir);
-              float up = max(d.y, 0.0);
-              vec3 col = mix(uFogColor, vec3(0.15, 0.34, 0.70), pow(up, 0.45));
-              float sd = max(dot(d, uLight), 0.0);
-              col += vec3(1.0, 0.86, 0.62) * (pow(sd, 6.0) * 0.2 + pow(sd, 64.0) * 0.35);
-              col += vec3(1.8, 1.7, 1.5) * smoothstep(0.9994, 0.9997, sd);
-              if (d.y > 0.0) {
-                vec2 uv = d.xz / (d.y + 0.12) * 0.2 + vec2(uTimeS * 0.004, uTimeS * 0.0015);
-                float c = texture2D(uNoise, uv).r * 0.6 + texture2D(uNoise, uv * 2.7 + 0.3).r * 0.3
-                        + texture2D(uNoise, uv * 6.1 + 0.7).r * 0.1;
-                float cover = smoothstep(0.52, 0.78, c) * smoothstep(0.0, 0.2, d.y);
-                float lit = texture2D(uNoise, uv - uLight.xz * 0.015).r;
-                vec3 cloud = mix(vec3(0.60, 0.64, 0.70), vec3(1.08, 1.06, 1.02), clamp(0.55 + (c - lit) * 3.0, 0.0, 1.0));
-                cloud += vec3(1.0, 0.9, 0.7) * pow(sd, 8.0) * 0.4;
-                col = mix(col, cloud, cover * 0.92);
-              } else {
-                col = uFogColor * 0.96;
-              }
-              gl_FragColor = vec4(grade(col), 1.0);
+              float el = asin(clamp(d.y, -1.0, 1.0)) / 1.5708;
+              vec2 uv = vec2(atan(d.z, d.x) * 0.159155 + 0.5, 1.0 - clamp(el, 0.004, 1.0));
+              vec3 haze = grade(uFogColor);
+              vec3 col = mix(haze, texture2D(uSky, uv).rgb, smoothstep(0.0, 0.05, el));
+              gl_FragColor = vec4(col, 1.0);
             }
             """;
 
@@ -318,11 +364,17 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     // ------------------------------------------------------------------ state
 
     private final Game game;
+    private final android.content.Context context;
     private Scenery scene;
+    // terrain program
+    private int terProg, tPos, tNormal, tColor, tMVP, tModel, tLightVP, tTint, tLight, tCam, tFogColor,
+            tFogDensity, tShadowOn, tTexel, tClip, tNoise, tGrassA, tGrassB, tSand, tRock, tPebble, tShadow;
+    private int texGrassA, texGrassB, texSand, texRock, texPebble, texBoulder, texBark, texPlanks, texSky;
+    private int uTexL, uTexScale, sSky;
     private int litProg, skyProg, waterProg, partProg;
     private int lPos, lNormal, lColor, uMVP, uModel, uTint, uLight, uCam, uFogColor, uFogDensity,
             uSpec, uShine, uDetail, uClip, uAlpha, uNoiseL;
-    private int sPos, sMVP, sLight, sFogColor, sTime, sNoise;
+    private int sPos, sMVP, sFogColor;
     private int wPos, wVP, wTime, wTimeF, wCam, wLight, wFogColor, wFogDensity, wScreen,
             wReflect, wNormalMap, wDepth, wNoise;
     private int pPos, pExtra, pVP, pColor, pNoiseAmt, pNoise;
@@ -366,7 +418,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private final FloatBuffer partBuf, shadowBuf;
     private int partVerts, shadowVerts;
 
-    GameRenderer(Game game) {
+    GameRenderer(android.content.Context context, Game game) {
+        this.context = context.getApplicationContext();
         this.game = game;
         partBuf = ByteBuffer.allocateDirect(game.particles.max * 6 * 6 * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -400,6 +453,31 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         uTexel = GLES20.glGetUniformLocation(litProg, "uTexel");
         uAtlasL = GLES20.glGetUniformLocation(litProg, "uAtlas");
         uShadowL = GLES20.glGetUniformLocation(litProg, "uShadow");
+        uTexL = GLES20.glGetUniformLocation(litProg, "uTex");
+        uTexScale = GLES20.glGetUniformLocation(litProg, "uTexScale");
+
+        terProg = program(LIT_VS, TERRAIN_FS);
+        tPos = GLES20.glGetAttribLocation(terProg, "aPos");
+        tNormal = GLES20.glGetAttribLocation(terProg, "aNormal");
+        tColor = GLES20.glGetAttribLocation(terProg, "aColor");
+        tMVP = GLES20.glGetUniformLocation(terProg, "uMVP");
+        tModel = GLES20.glGetUniformLocation(terProg, "uModel");
+        tLightVP = GLES20.glGetUniformLocation(terProg, "uLightVP");
+        tTint = GLES20.glGetUniformLocation(terProg, "uTint");
+        tLight = GLES20.glGetUniformLocation(terProg, "uLight");
+        tCam = GLES20.glGetUniformLocation(terProg, "uCam");
+        tFogColor = GLES20.glGetUniformLocation(terProg, "uFogColor");
+        tFogDensity = GLES20.glGetUniformLocation(terProg, "uFogDensity");
+        tShadowOn = GLES20.glGetUniformLocation(terProg, "uShadowOn");
+        tTexel = GLES20.glGetUniformLocation(terProg, "uTexel");
+        tClip = GLES20.glGetUniformLocation(terProg, "uClip");
+        tNoise = GLES20.glGetUniformLocation(terProg, "uNoise");
+        tGrassA = GLES20.glGetUniformLocation(terProg, "uGrassA");
+        tGrassB = GLES20.glGetUniformLocation(terProg, "uGrassB");
+        tSand = GLES20.glGetUniformLocation(terProg, "uSand");
+        tRock = GLES20.glGetUniformLocation(terProg, "uRock");
+        tPebble = GLES20.glGetUniformLocation(terProg, "uPebble");
+        tShadow = GLES20.glGetUniformLocation(terProg, "uShadow");
 
         shadowProg = program(SHADOW_VS, SHADOW_FS);
         shPos = GLES20.glGetAttribLocation(shadowProg, "aPos");
@@ -411,10 +489,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         skyProg = program(SKY_VS, SKY_FS);
         sPos = GLES20.glGetAttribLocation(skyProg, "aPos");
         sMVP = GLES20.glGetUniformLocation(skyProg, "uMVP");
-        sLight = GLES20.glGetUniformLocation(skyProg, "uLight");
         sFogColor = GLES20.glGetUniformLocation(skyProg, "uFogColor");
-        sTime = GLES20.glGetUniformLocation(skyProg, "uTimeS");
-        sNoise = GLES20.glGetUniformLocation(skyProg, "uNoise");
+        sSky = GLES20.glGetUniformLocation(skyProg, "uSky");
 
         waterProg = program(WATER_VS, WATER_FS);
         wPos = GLES20.glGetAttribLocation(waterProg, "aPos");
@@ -453,6 +529,16 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAtlas);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        // photographed textures (CC0, from Poly Haven and ambientCG; see tools/textures/README.md)
+        texGrassA = loadTexture("tex/grass_a.jpg", true, 0x5A, 0x6B, 0x30);
+        texGrassB = loadTexture("tex/grass_b.jpg", true, 0x45, 0x5C, 0x29);
+        texSand = loadTexture("tex/sand.jpg", true, 0xA6, 0x96, 0x70);
+        texRock = loadTexture("tex/rock.jpg", true, 0x8C, 0x8C, 0x8A);
+        texPebble = loadTexture("tex/pebbles.jpg", true, 0x78, 0x6B, 0x5C);
+        texBoulder = loadTexture("tex/boulder.jpg", true, 0x6B, 0x6B, 0x57);
+        texBark = loadTexture("tex/bark.jpg", true, 0x66, 0x52, 0x40);
+        texPlanks = loadTexture("tex/planks.jpg", true, 0x4F, 0x42, 0x3B);
+        texSky = loadTexture("tex/sky.jpg", false, 0x8A, 0xA8, 0xD6);
         reflFbo = 0;
 
         scene = new Scenery(game);
@@ -519,6 +605,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             GLES20.glUniform1f(shFoliage, 0f);
             scene.terrain.draw(shPos, -1, shColor);
             scene.props.draw(shPos, -1, shColor);
+            scene.bark.draw(shPos, -1, shColor);
+            scene.wood.draw(shPos, -1, shColor);
+            scene.rocks.draw(shPos, -1, shColor);
             GLES20.glUniform1f(shFoliage, 1f);
             scene.foliage.draw(shPos, -1, shColor);
             GLES20.glDisableVertexAttribArray(shPos);
@@ -645,13 +734,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         Matrix.translateM(model, 0, cam[0], cam[1] * 0.2f, cam[2]);
         Matrix.multiplyMM(mvp, 0, curVP, 0, model, 0);
         GLES20.glUniformMatrix4fv(sMVP, 1, false, mvp, 0);
-        GLES20.glUniform3f(sLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(sFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
-        GLES20.glUniform1f(sTime, time);
-        bindTex(0, texNoise, sNoise);
+        bindTex(0, texSky, sSky);
         scene.sky.draw(sPos, -1, -1);
         GLES20.glDisableVertexAttribArray(sPos);
         GLES20.glDepthMask(true);
+
+        drawTerrain(cx, cy, cz, reflection);
 
         GLES20.glUseProgram(litProg);
         GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
@@ -669,10 +758,23 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         bindTex(1, texAtlas, uAtlasL);
         bindTex(2, shadowOk ? shadowTex : texWhite, uShadowL);
 
+        // photo-textured timber, bark and boulders (triplanar)
         Matrix.setIdentityM(model, 0);
-        material(0.05f, 8f, true);
-        drawLit(scene.terrain);
-        if (islandOn) drawLit(scene.island);
+        GLES20.glUniform1f(uDetail, 4f);
+        GLES20.glUniform1f(uSpec, 0.06f);
+        GLES20.glUniform1f(uShine, 12f);
+        bindTex(3, texPlanks, uTexL);
+        GLES20.glUniform1f(uTexScale, 0.5f);
+        drawLit(scene.wood);
+        bindTex(3, texBark, uTexL);
+        GLES20.glUniform1f(uTexScale, 0.8f);
+        drawLit(scene.bark);
+        if (islandOn) drawLit(scene.islandBark);
+        bindTex(3, texBoulder, uTexL);
+        GLES20.glUniform1f(uTexScale, 0.45f);
+        drawLit(scene.rocks);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+
         material(0.1f, 16f, false);
         GLES20.glUniform1f(uDetail, 2f);
         drawLit(scene.props);
@@ -736,6 +838,35 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             material(0.5f, 30f, false);
             drawLit(scene.marker);
         }
+    }
+
+    private void drawTerrain(float cx, float cy, float cz, boolean reflection) {
+        GLES20.glUseProgram(terProg);
+        GLES20.glUniform3f(tLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
+        GLES20.glUniform3f(tCam, cx, cy, cz);
+        GLES20.glUniform3f(tFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
+        GLES20.glUniform1f(tFogDensity, FOG_DENSITY);
+        GLES20.glUniform1f(tClip, reflection ? 1f : 0f);
+        GLES20.glUniform1f(tShadowOn, shadowOk ? 1f : 0f);
+        GLES20.glUniform1f(tTexel, 1f / Math.max(1, shadowSize));
+        GLES20.glUniform3f(tTint, 1f, 1f, 1f);
+        GLES20.glUniformMatrix4fv(tLightVP, 1, false, lightVP, 0);
+        bindTex(0, texNoise, tNoise);
+        bindTex(1, texGrassA, tGrassA);
+        bindTex(2, texGrassB, tGrassB);
+        bindTex(3, texSand, tSand);
+        bindTex(4, texRock, tRock);
+        bindTex(5, texPebble, tPebble);
+        bindTex(6, shadowOk ? shadowTex : texWhite, tShadow);
+        Matrix.setIdentityM(model, 0);
+        GLES20.glUniformMatrix4fv(tMVP, 1, false, curVP, 0);
+        GLES20.glUniformMatrix4fv(tModel, 1, false, model, 0);
+        scene.terrain.draw(tPos, tNormal, tColor);
+        if (islandOn) scene.island.draw(tPos, tNormal, tColor);
+        GLES20.glDisableVertexAttribArray(tPos);
+        GLES20.glDisableVertexAttribArray(tNormal);
+        GLES20.glDisableVertexAttribArray(tColor);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
     }
 
     private void drawWater() {
@@ -863,6 +994,43 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER,
                 mipmap ? GLES20.GL_LINEAR_MIPMAP_LINEAR : GLES20.GL_LINEAR);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+    }
+
+    /**
+     * Loads an image from the app's assets. Tiling textures repeat and get mipmaps (plus
+     * anisotropic filtering where available, which keeps the ground sharp at shallow angles);
+     * otherwise it wraps horizontally only (the sky panorama). Falls back to a flat colour.
+     */
+    private int loadTexture(String asset, boolean tiling, int r, int g, int b) {
+        android.graphics.Bitmap bmp = null;
+        try (java.io.InputStream in = context.getAssets().open(asset)) {
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inScaled = false;
+            bmp = android.graphics.BitmapFactory.decodeStream(in, null, o);
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "Missing texture " + asset);
+        }
+        if (bmp == null) return texture(new byte[]{(byte) r, (byte) g, (byte) b}, 1, GLES20.GL_RGB, false);
+        int[] id = new int[1];
+        GLES20.glGenTextures(1, id, 0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id[0]);
+        android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0);
+        bmp.recycle();
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T,
+                tiling ? GLES20.GL_REPEAT : GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        if (tiling) {
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR);
+            GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D);
+            String ext = GLES20.glGetString(GLES20.GL_EXTENSIONS);
+            if (ext != null && ext.contains("texture_filter_anisotropic")) {
+                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, 0x84FE /* TEXTURE_MAX_ANISOTROPY_EXT */, 4f);
+            }
+        } else {
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        }
+        return id[0];
     }
 
     /** Uploads a square texture; repeating textures get mipmaps. */

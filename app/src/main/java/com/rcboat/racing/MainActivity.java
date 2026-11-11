@@ -24,7 +24,7 @@ public class MainActivity extends Activity {
         glView.setEGLContextClientVersion(2);
         glView.setEGLConfigChooser(new GameRenderer.ConfigChooser());
         glView.setPreserveEGLContextOnPause(true);
-        glView.setRenderer(new GameRenderer(game));
+        glView.setRenderer(new GameRenderer(this, game));
 
         HudView hud = new HudView(this, game);
 

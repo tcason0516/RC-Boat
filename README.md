@@ -32,6 +32,12 @@ that release. New builds install over the old one.
   Serpentine, Dog Bone, Clover, Speedway, Heart.
 - Menu options also include opponents (0–5), laps, difficulty, controls and sound.
 
+## Credits
+
+Ground, rock, bark, plank and sky photographs are public-domain (CC0) assets from
+[Poly Haven](https://polyhaven.com) and [ambientCG](https://ambientcg.com).
+See `tools/textures/README.md` for the list.
+
 ## Building yourself
 
 Requires JDK 17 and the Android SDK (API 34).

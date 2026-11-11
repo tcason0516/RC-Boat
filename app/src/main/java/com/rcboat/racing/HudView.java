@@ -1,8 +1,6 @@
 package com.rcboat.racing;
 
 import android.content.Context;
-import android.content.res.AssetFileDescriptor;
-import android.media.MediaPlayer;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -57,10 +55,6 @@ final class HudView extends View {
     private final Stick left = new Stick(), right = new Stick();
     private float u;  // 1% of the screen's short side
 
-    // trash talk voice
-    private int talkSeq;
-    private MediaPlayer voice;
-
     HudView(Context ctx, Game game) {
         super(ctx);
         this.game = game;
@@ -75,15 +69,7 @@ final class HudView extends View {
         int w = getWidth(), h = getHeight();
         u = Math.min(w, h) / 100f;
         buttons.clear();
-        int newSpeaker = -1, newLine = -1;
-        boolean speak = false;
         synchronized (game) {
-            if (game.talk.seq != talkSeq) {
-                talkSeq = game.talk.seq;
-                newSpeaker = game.talk.speaker;
-                newLine = game.talk.line;
-                speak = game.soundOn && game.talkOn;
-            }
             switch (game.state) {
                 case MENU:
                     drawMenu(c, w, h);
@@ -93,13 +79,12 @@ final class HudView extends View {
                     break;
             }
         }
-        if (newLine >= 0) startTalk(newSpeaker, newLine, speak);
         postInvalidateOnAnimation();
     }
 
     private void drawMenu(Canvas c, int w, int h) {
         releaseSticks();
-        float pw = Math.min(w * 0.94f, 190 * u), ph = 94 * u;
+        float pw = Math.min(w * 0.94f, 190 * u), ph = 90 * u;
         float px = (w - pw) / 2f, py = (h - ph) / 2f;
         panel(c, px, py, pw, ph);
 
@@ -109,9 +94,9 @@ final class HudView extends View {
                 + Boat.HULL_INFO[g.hull], w / 2f, py + 16.5f * u, 3.8f * u, 0xFF9FD8FF);
 
         float colW = (pw - 6 * u) / 2f;
-        float rowH = 11.4f * u;
+        float rowH = 13 * u;
         float x0 = px + 3 * u, x1 = px + 3 * u + colW;
-        float y0 = py + 19 * u;
+        float y0 = py + 20 * u;
 
         row(c, x0, y0, colW, rowH, "Track", Track.NAMES[g.trackId],
                 () -> g.setTrack(g.trackId - 1), () -> g.setTrack(g.trackId + 1));
@@ -123,19 +108,17 @@ final class HudView extends View {
         row(c, x0, y0 + 3 * rowH, colW, rowH, "Laps", String.valueOf(g.laps),
                 () -> g.laps = Math.max(1, g.laps - 1),
                 () -> g.laps = Math.min(9, g.laps + 1));
-        row(c, x0, y0 + 4 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+        row(c, x1, y0, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
                 () -> g.difficulty = Math.max(0, g.difficulty - 1),
                 () -> g.difficulty = Math.min(2, g.difficulty + 1));
-        row(c, x1, y0, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
+        row(c, x1, y0 + rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
                 () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
-        row(c, x1, y0 + rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
                 () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
-        row(c, x1, y0 + 2 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
                 () -> g.soundOn = !g.soundOn, () -> g.soundOn = !g.soundOn);
-        row(c, x1, y0 + 3 * rowH, colW, rowH, "Trash Talk", g.talkOn ? "On" : "Off",
-                () -> g.talkOn = !g.talkOn, () -> g.talkOn = !g.talkOn);
 
-        float bw = 56 * u, bh = 11 * u;
+        float bw = 56 * u, bh = 12 * u;
         button(c, (w - bw) / 2f, py + ph - bh - 3 * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.5f * u,
                 game::startRace);
     }
@@ -391,42 +374,6 @@ final class HudView extends View {
         float by = py + ph - bh - 4 * u;
         button(c, w / 2f - bw - 2 * u, by, bw, bh, "RACE AGAIN", 0xFF2E9E4F, 4.2f * u, game::startRace);
         button(c, w / 2f + 2 * u, by, bw, bh, "MAIN MENU", 0xFF35506A, 4.2f * u, game::startDemo);
-    }
-
-    // ------------------------------------------------------------------ trash talk
-
-    private void startTalk(int speaker, int line, boolean withVoice) {
-        stopVoice();
-        if (!withVoice) return;
-        try {
-            AssetFileDescriptor afd = getContext().getAssets().openFd(TrashTalk.assetPath(speaker, line));
-            MediaPlayer mp = new MediaPlayer();
-            mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
-            afd.close();
-            mp.setOnCompletionListener(m -> {
-                if (voice == m) voice = null;
-                m.release();
-                game.talking = false;
-            });
-            mp.prepare();
-            mp.setVolume(1f, 1f);
-            mp.start();
-            voice = mp;
-            game.talking = true;
-        } catch (Exception e) {
-            game.talking = false;
-        }
-    }
-
-    /** Stops any voice clip that is playing. */
-    void stopVoice() {
-        MediaPlayer mp = voice;
-        voice = null;
-        if (mp != null) {
-            try { mp.stop(); } catch (Exception ignored) { }
-            mp.release();
-        }
-        game.talking = false;
     }
 
     // ------------------------------------------------------------------ primitives

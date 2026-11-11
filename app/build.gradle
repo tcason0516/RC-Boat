@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.rcboat.racing'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.rcboat.racing'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        // A fixed key kept in the repo so every build can be installed over the previous one.
+        shared {
+            storeFile rootProject.file('keystore/rcboat.jks')
+            storePassword 'rcboat123'
+            keyAlias 'rcboat'
+            keyPassword 'rcboat123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

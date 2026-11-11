@@ -84,55 +84,62 @@ final class HudView extends View {
 
     private void drawMenu(Canvas c, int w, int h) {
         releaseSticks();
-        float pw = Math.min(w * 0.9f, 120 * u), ph = 94 * u;
+        float pw = Math.min(w * 0.94f, 190 * u), ph = 90 * u;
         float px = (w - pw) / 2f, py = (h - ph) / 2f;
         panel(c, px, py, pw, ph);
 
-        textC(c, "RC BOAT RACING", w / 2f, py + 11 * u, 9 * u, Color.WHITE);
-        textC(c, "Lake Buoy Circuit", w / 2f, py + 17.5f * u, 4 * u, 0xFF9FD8FF);
-
-        float rowH = 9.6f * u;
-        float y = py + 22 * u;
+        textC(c, "RC BOAT RACING", w / 2f, py + 10 * u, 8.5f * u, Color.WHITE);
         final Game g = game;
-        y = row(c, px, y, pw, rowH, "Opponents", String.valueOf(g.opponents),
+        textC(c, Track.NAMES[g.trackId] + "  \u2022  " + Boat.HULL_NAMES[g.hull] + ": "
+                + Boat.HULL_INFO[g.hull], w / 2f, py + 16.5f * u, 3.8f * u, 0xFF9FD8FF);
+
+        float colW = (pw - 6 * u) / 2f;
+        float rowH = 13 * u;
+        float x0 = px + 3 * u, x1 = px + 3 * u + colW;
+        float y0 = py + 20 * u;
+
+        row(c, x0, y0, colW, rowH, "Track", Track.NAMES[g.trackId],
+                () -> g.setTrack(g.trackId - 1), () -> g.setTrack(g.trackId + 1));
+        row(c, x0, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
+                () -> g.hull = (g.hull + 2) % 3, () -> g.hull = (g.hull + 1) % 3);
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
                 () -> g.opponents = Math.max(0, g.opponents - 1),
                 () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
-        y = row(c, px, y, pw, rowH, "Laps", String.valueOf(g.laps),
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Laps", String.valueOf(g.laps),
                 () -> g.laps = Math.max(1, g.laps - 1),
                 () -> g.laps = Math.min(9, g.laps + 1));
-        y = row(c, px, y, pw, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+        row(c, x1, y0, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
                 () -> g.difficulty = Math.max(0, g.difficulty - 1),
                 () -> g.difficulty = Math.min(2, g.difficulty + 1));
-        y = row(c, px, y, pw, rowH, "Camera", g.view == Game.VIEW_SHORE ? "Shore" : "Boat (FPV)",
-                () -> g.view = 1 - g.view, () -> g.view = 1 - g.view);
-        y = row(c, px, y, pw, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+        row(c, x1, y0 + rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
+                () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
                 () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
-        y = row(c, px, y, pw, rowH, "Sound", g.soundOn ? "On" : "Off",
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
                 () -> g.soundOn = !g.soundOn, () -> g.soundOn = !g.soundOn);
 
-        float bw = 52 * u, bh = 11 * u;
+        float bw = 56 * u, bh = 12 * u;
         button(c, (w - bw) / 2f, py + ph - bh - 3 * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.5f * u,
                 game::startRace);
     }
 
-    private float row(Canvas c, float px, float y, float pw, float rh, String label, String value,
-                      Action dec, Action inc) {
-        float pad = 6 * u;
+    private void row(Canvas c, float x, float y, float cw, float rh, String label, String value,
+                     Action dec, Action inc) {
+        float pad = 3 * u;
         text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(4.6f * u);
+        text.setTextSize(4.0f * u);
         text.setColor(0xFFDDE8F0);
-        c.drawText(label, px + pad, y + rh * 0.62f, text);
+        c.drawText(label, x + pad, y + rh * 0.6f, text);
 
-        float bs = rh * 0.8f;
-        float rightEdge = px + pw - pad;
-        float valueW = 34 * u;
+        float bs = rh * 0.72f;
+        float rightEdge = x + cw - pad;
+        float valueW = Math.min(34 * u, cw * 0.42f);
         float incX = rightEdge - bs;
         float decX = incX - valueW - bs;
         float by = y + (rh - bs) / 2f;
-        button(c, decX, by, bs, bs, "<", 0xFF35506A, 4 * u, dec);
-        button(c, incX, by, bs, bs, ">", 0xFF35506A, 4 * u, inc);
-        textC(c, value, decX + bs + valueW / 2f, y + rh * 0.62f, 4.6f * u, Color.WHITE);
-        return y + rh;
+        button(c, decX, by, bs, bs, "<", 0xFF35506A, 5 * u, dec);
+        button(c, incX, by, bs, bs, ">", 0xFF35506A, 5 * u, inc);
+        textC(c, value, decX + bs + valueW / 2f, y + rh * 0.6f, 4.2f * u, Color.WHITE);
     }
 
     private void drawRace(Canvas c, int w, int h) {
@@ -163,7 +170,7 @@ final class HudView extends View {
         // ---- top buttons ----
         float bw = 15 * u, bh = 9 * u, gap = 2 * u;
         float bx = w / 2f - (bw * 3 + gap * 2) / 2f;
-        button(c, bx, 2 * u, bw, bh, game.view == Game.VIEW_SHORE ? "SHORE" : "BOAT", 0xCC24435E, 3.6f * u,
+        button(c, bx, 2 * u, bw, bh, Game.VIEW_SHORT[game.view], 0xCC24435E, 3.6f * u,
                 game::toggleView);
         button(c, bx + bw + gap, 2 * u, bw, bh, "PAUSE", 0xCC24435E, 3.6f * u, () -> game.setPaused(true));
         final Game g = game;
@@ -270,9 +277,9 @@ final class HudView extends View {
     private void drawMinimap(Canvas c, float x, float y, float w, float h) {
         panel(c, x, y, w, h);
         Track t = game.track;
-        float minX = -60, maxX = 60, minZ = -42, maxZ = 42;
+        float minX = t.minX - 8, maxX = t.maxX + 8, minZ = t.minZ - 8, maxZ = t.maxZ + 8;
         float sc = Math.min((w - 4 * u) / (maxX - minX), (h - 4 * u) / (maxZ - minZ));
-        float ox = x + w / 2f, oy = y + h / 2f;
+        float ox = x + w / 2f - (minX + maxX) / 2f * sc, oy = y + h / 2f - (minZ + maxZ) / 2f * sc;
         path.reset();
         for (int i = 0; i <= Track.N; i += 6) {
             int k = i % Track.N;
@@ -284,15 +291,18 @@ final class HudView extends View {
         stroke.setStrokeWidth(Track.HALF_WIDTH * 2 * sc);
         c.drawPath(path, stroke);
         // island
+        if (game.islandVisible()) {
         fill.setColor(0xFF4E8F3A);
         rect.set(ox + (World.ISLAND_X - 16) * sc, oy + (World.ISLAND_Z - 8) * sc,
                 ox + (World.ISLAND_X + 16) * sc, oy + (World.ISLAND_Z + 8) * sc);
         c.drawOval(rect, fill);
+        }
         // start line
         stroke.setColor(Color.WHITE);
         stroke.setStrokeWidth(0.5f * u);
         float sx = ox + t.px[0] * sc, sy = oy + t.pz[0] * sc;
-        c.drawLine(sx, sy - Track.HALF_WIDTH * sc, sx, sy + Track.HALF_WIDTH * sc, stroke);
+        float gx = t.nx(0) * Track.HALF_WIDTH * sc, gz = t.nz(0) * Track.HALF_WIDTH * sc;
+        c.drawLine(sx - gx, sy - gz, sx + gx, sy + gz, stroke);
         // spectator
         if (game.view == Game.VIEW_SHORE) {
             fill.setColor(0xFFFFFFFF);

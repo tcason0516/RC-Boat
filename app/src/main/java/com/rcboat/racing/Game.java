@@ -12,7 +12,9 @@ import java.util.Random;
 final class Game {
     enum State { MENU, COUNTDOWN, RACING, FINISHED }
 
-    static final int VIEW_SHORE = 0, VIEW_FPV = 1;
+    static final int VIEW_SHORE = 0, VIEW_FPV = 1, VIEW_CHASE = 2;
+    static final String[] VIEW_NAMES = {"Shore", "Boat (FPV)", "Chase"};
+    static final String[] VIEW_SHORT = {"SHORE", "BOAT", "CHASE"};
     static final int MAX_OPPONENTS = 5;
 
     static final float[][] COLORS = {
@@ -32,13 +34,15 @@ final class Game {
     int laps = 3;
     int difficulty = 1;
     int view = VIEW_SHORE;
+    int trackId = 0;
+    int hull = Boat.V_HULL;
     boolean dualStick = true;
     boolean soundOn = true;
 
     // ---- state ----
     State state = State.MENU;
     boolean paused;
-    final Track track = new Track();
+    Track track = Track.get(0);
     final Random rnd = new Random(7);
     Boat[] boats = new Boat[0];
     Boat[] order = new Boat[0];
@@ -50,7 +54,7 @@ final class Game {
     String message = "";
     float messageTime;
     final Particles particles = new Particles(700);
-    final float[] buoyWobble;
+    float[] buoyWobble;
 
     // ---- input (written by the UI thread) ----
     volatile float inThrottle, inSteer;
@@ -61,23 +65,45 @@ final class Game {
     volatile boolean engineOn;
     volatile int beepRequest;       // Hz, consumed by the audio thread
 
-    // ---- camera ----
+    // ---- drivers' platform (5 ft / 1.52 m tall) on the south shore ----
+    static final float PLATFORM_HEIGHT = 1.524f;
+    static final float PLATFORM_W = 10f, PLATFORM_D = 3f;
+    static final float DRIVER_SPACING = 1.5f;
+    static final float EYE_HEIGHT = 1.62f;
     final float shoreZ;
-    final float dockY = 0.45f;
+    final float platformZ;      // centre of the platform
+    final float groundY;        // ground level under the platform
+    final float deckY;          // top of the platform deck
+    final float driverZ;        // where the drivers stand
+    final float[] driverX = new float[COLORS.length];
+
+    // ---- camera ----
     final float[] shoreEye = new float[3];
     final float[] camTarget = new float[3];
     float camFov = 40f;
     private boolean camInit;
+    private float fpvPitch, fpvRoll, fpvY, chaseHeading;
     private final float[] tmpM = new float[16];
     private final float[] tmpV = new float[8];
+    private final float[] att = new float[2];
 
     Game() {
         shoreZ = World.southShoreZ();
-        shoreEye[0] = 0f;
-        shoreEye[1] = dockY + 1.65f;
-        shoreEye[2] = shoreZ - 6.2f;
+        platformZ = shoreZ + 2.2f;
+        float g = -10f;
+        for (float x = -PLATFORM_W / 2; x <= PLATFORM_W / 2; x += 1f)
+            for (float z = platformZ - PLATFORM_D / 2; z <= platformZ + PLATFORM_D / 2; z += 0.5f)
+                g = Math.max(g, World.baseHeight(x, z));
+        groundY = g;
+        deckY = groundY + PLATFORM_HEIGHT;
+        driverZ = platformZ - 0.9f;
         buoyWobble = new float[track.buoys.size()];
         startDemo();
+    }
+
+    /** Whether the island is shown / solid right now. */
+    boolean islandVisible() {
+        return track.hasIsland && !(state != State.MENU && view == VIEW_SHORE);
     }
 
     // ------------------------------------------------------------------ setup
@@ -88,16 +114,32 @@ final class Game {
         float[] skillRange = {0.84f, 0.91f, 0.975f};
         for (int i = 0; i < count; i++) {
             boolean isPlayer = withPlayer && i == 0;
-            Boat b = new Boat(i, NAMES[i], COLORS[i], isPlayer, rnd);
+            int h = isPlayer ? hull : rnd.nextInt(Boat.HULL_NAMES.length);
+            Boat b = new Boat(i, NAMES[i], COLORS[i], isPlayer, h, rnd);
             if (!isPlayer) {
                 b.autopilot = true;
                 b.skill = withPlayer ? skillRange[difficulty] + rnd.nextFloat() * 0.06f
                         : 0.9f + rnd.nextFloat() * 0.08f;
-                b.maxSpeed = Boat.BASE_MAX_SPEED * b.skill;
+                b.maxSpeed = b.topSpeed * b.skill;
                 b.lane = b.laneTarget = 0;
             }
             boats[i] = b;
         }
+        // driver positions on the platform: the player stands in the middle
+        int playerStand = withPlayer ? count / 2 : -1;
+        int k = 0;
+        for (int i = 0; i < count; i++) {
+            int stand;
+            if (withPlayer && i == 0) stand = playerStand;
+            else {
+                if (k == playerStand) k++;
+                stand = k++;
+            }
+            driverX[i] = (stand - (count - 1) / 2f) * DRIVER_SPACING;
+        }
+        shoreEye[0] = withPlayer ? driverX[0] : 0f;
+        shoreEye[1] = deckY + EYE_HEIGHT;
+        shoreEye[2] = driverZ;
         // grid: two columns, rows 3.5 m apart, behind the start line
         int[] slotOf = new int[count];
         int s = 0;
@@ -145,9 +187,16 @@ final class Game {
     }
 
     synchronized void toggleView() {
-        view = view == VIEW_SHORE ? VIEW_FPV : VIEW_SHORE;
+        view = (view + 1) % VIEW_NAMES.length;
         camInit = false;
-        setMessage(view == VIEW_SHORE ? "SHORE VIEW" : "BOAT VIEW", 1.2f);
+        setMessage(VIEW_SHORT[view] + " VIEW", 1.2f);
+    }
+
+    synchronized void setTrack(int id) {
+        trackId = (id + Track.COUNT) % Track.COUNT;
+        track = Track.get(trackId);
+        buoyWobble = new float[track.buoys.size()];
+        startDemo();
     }
 
     synchronized void setPaused(boolean p) {
@@ -172,6 +221,7 @@ final class Game {
 
     synchronized void update(float dt) {
         time += dt;
+        World.islandEnabled = islandVisible();
         if (messageTime > 0) messageTime -= dt;
         for (int i = 0; i < buoyWobble.length; i++) buoyWobble[i] *= (float) Math.exp(-2.5f * dt);
         if (paused) {
@@ -451,15 +501,48 @@ final class Game {
         }
         Boat b = player;
         if (view == VIEW_FPV) {
-            b.modelMatrix(tmpM, time);
+            // Stabilised: only a fraction of the boat's pitch/roll reaches the camera,
+            // and it is low-pass filtered so wave chop gives a gentle sway, not a shake.
+            b.waveAttitude(time, att);
+            float tp = (b.pitch + att[0]) * 0.35f, tr = (b.roll + att[1]) * 0.3f;
+            if (!camInit) {
+                fpvPitch = tp; fpvRoll = tr; fpvY = b.y;
+                camInit = true;
+            } else {
+                float k = Math.min(1f, dt * 3f);
+                fpvPitch += (tp - fpvPitch) * k;
+                fpvRoll += (tr - fpvRoll) * k;
+                fpvY += (b.y - fpvY) * Math.min(1f, dt * 4f);
+            }
+            android.opengl.Matrix.setIdentityM(tmpM, 0);
+            android.opengl.Matrix.translateM(tmpM, 0, b.x, fpvY, b.z);
+            android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(b.heading), 0, 1, 0);
+            android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(fpvPitch), 1, 0, 0);
+            android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(fpvRoll), 0, 0, 1);
             transform(tmpM, 0f, 0.40f, -0.20f, 1f, out, 0);
             transform(tmpM, 0f, 0.24f, -6f, 1f, out, 3);
             transform(tmpM, 0f, 1f, 0f, 0f, tmpV, 0);
-            // soften the roll so it's not nauseating
-            float ux = tmpV[0] * 0.5f, uy = tmpV[1] * 0.5f + 0.5f, uz = tmpV[2] * 0.5f;
-            out[6] = ux; out[7] = uy; out[8] = uz;
+            out[6] = tmpV[0]; out[7] = tmpV[1]; out[8] = tmpV[2];
             out[9] = 74f;
             out[10] = 0.05f;
+            return;
+        }
+        if (view == VIEW_CHASE) {
+            if (!camInit) {
+                chaseHeading = b.heading;
+                camInit = true;
+            } else {
+                chaseHeading = Boat.wrapAngle(chaseHeading
+                        + Boat.wrapAngle(b.heading - chaseHeading) * Math.min(1f, dt * 4f));
+            }
+            float fx = (float) -Math.sin(chaseHeading), fz = (float) -Math.cos(chaseHeading);
+            float ex = b.x - fx * 3.6f, ez = b.z - fz * 3.6f;
+            float ey = Math.max(b.y + 1.45f, World.height(ex, ez) + 0.7f);
+            out[0] = ex; out[1] = ey; out[2] = ez;
+            out[3] = b.x + b.fwdX() * 2.0f; out[4] = b.y + 0.35f; out[5] = b.z + b.fwdZ() * 2.0f;
+            out[6] = 0; out[7] = 1; out[8] = 0;
+            out[9] = 62f;
+            out[10] = 0.1f;
             return;
         }
         // shore: fixed spectator on the dock who turns to follow the boat

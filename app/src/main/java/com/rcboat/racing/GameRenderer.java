@@ -146,6 +146,12 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     // per-frame copies made while holding the game lock
     private final float[][] boatM = new float[Game.COLORS.length][16];
     private final int[] boatColor = new int[Game.COLORS.length];
+    private final int[] boatHull = new int[Game.COLORS.length];
+    private final float[][] figure = new float[Game.COLORS.length][4];   // x, y, z, yaw (deg)
+    private final boolean[] figureVisible = new boolean[Game.COLORS.length];
+    private Track track;
+    private boolean islandOn;
+    private final Mesh[] gates = new Mesh[Track.COUNT];
     private int boatCount;
     private final float[] markerPos = new float[3];
     private boolean showMarker;
@@ -191,6 +197,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         pVP = GLES20.glGetUniformLocation(partProg, "uVP");
 
         scene = new Scenery(game);
+        java.util.Arrays.fill(gates, null);
 
         GLES20.glClearColor(Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2], 1f);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
@@ -217,10 +224,21 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             game.camera(dt, cam);
             time = game.time;
             boatCount = game.boats.length;
+            track = game.track;
+            islandOn = game.islandVisible();
+            boolean shore = game.state != Game.State.MENU && game.view == Game.VIEW_SHORE;
             for (int i = 0; i < boatCount; i++) {
                 Boat b = game.boats[i];
                 b.modelMatrix(boatM[i], time);
                 boatColor[i] = b.id;
+                boatHull[i] = b.hull;
+                // the RC drivers on the platform turn to watch their boats
+                float fx = game.driverX[i], fz = game.driverZ;
+                figure[i][0] = fx;
+                figure[i][1] = game.deckY;
+                figure[i][2] = fz;
+                figure[i][3] = (float) Math.toDegrees(Math.atan2(-(b.x - fx), -(b.z - fz)));
+                figureVisible[i] = !(shore && b.isPlayer);
             }
             showMarker = game.state != Game.State.MENU && game.view == Game.VIEW_SHORE && game.player != null;
             if (showMarker) {
@@ -259,9 +277,24 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         Matrix.setIdentityM(model, 0);
         drawLit(scene.terrain, 1, 1, 1, 1);
         drawLit(scene.props, 1, 1, 1, 1);
+        if (islandOn) {
+            drawLit(scene.island, 1, 1, 1, 1);
+            drawLit(scene.islandProps, 1, 1, 1, 1);
+        }
+        if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
+        drawLit(gates[track.id], 1, 1, 1, 1);
+
+        // RC drivers on the platform
+        for (int i = 0; i < boatCount; i++) {
+            if (!figureVisible[i]) continue;
+            Matrix.setIdentityM(model, 0);
+            Matrix.translateM(model, 0, figure[i][0], figure[i][1], figure[i][2]);
+            Matrix.rotateM(model, 0, figure[i][3], 0, 1, 0);
+            drawLit(scene.figures[boatColor[i]], 1, 1, 1, 1);
+        }
 
         // buoys
-        java.util.ArrayList<float[]> buoys = game.track.buoys;
+        java.util.ArrayList<float[]> buoys = track.buoys;
         for (int i = 0; i < buoys.size(); i++) {
             float[] bu = buoys.get(i);
             float wy = World.wave(bu[0], bu[1], time);
@@ -276,17 +309,17 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         // boats
         for (int i = 0; i < boatCount; i++) {
             System.arraycopy(boatM[i], 0, model, 0, 16);
-            drawLit(scene.boats[boatColor[i]], 1, 1, 1, 1);
+            drawLit(scene.boats[boatHull[i]][boatColor[i]], 1, 1, 1, 1);
         }
 
         // "this is you" marker above the player's boat (shore view only)
         if (showMarker) {
             float dx = markerPos[0] - cam[0], dz = markerPos[2] - cam[2];
             float d = (float) Math.sqrt(dx * dx + dz * dz);
-            float s = Math.max(0.6f, d / 22f);
+            float s = Math.max(0.5f, d / 30f);
             Matrix.setIdentityM(model, 0);
-            Matrix.translateM(model, 0, markerPos[0], markerPos[1] + 1.0f + s * 0.4f
-                    + 0.15f * s * (float) Math.sin(time * 4f), markerPos[2]);
+            Matrix.translateM(model, 0, markerPos[0], markerPos[1] + 0.55f + s * 0.15f
+                    + 0.08f * s * (float) Math.sin(time * 4f), markerPos[2]);
             Matrix.scaleM(model, 0, s, s, s);
             Matrix.rotateM(model, 0, time * 90f, 0, 1, 0);
             drawLit(scene.marker, 1, 1, 1, 1);

@@ -24,7 +24,11 @@ final class World {
         return (float) (Math.sqrt(nx * nx + nz * nz) / wob);
     }
 
-    static float height(float x, float z) {
+    /** Whether the central island exists right now (off in shore view / on tracks that cross the middle). */
+    static volatile boolean islandEnabled = true;
+
+    /** Lake basin, beaches and hills, without the island. */
+    static float baseHeight(float x, float z) {
         float q = lakeQ(x, z);
         float h;
         if (q < 1f) {
@@ -41,19 +45,33 @@ final class World {
                 if (d > 30f) h += (d - 30f) * 0.25f;
             }
         }
-        // Island in the middle of the lake.
+        return h;
+    }
+
+    /** Height of the island surface, or -100 outside its footprint. */
+    static float islandHeight(float x, float z) {
         float ix = (x - ISLAND_X) / ISLAND_RX, iz = (z - ISLAND_Z) / ISLAND_RZ;
         float ri = (float) Math.sqrt(ix * ix + iz * iz);
-        if (ri < 1f) {
-            float hi = -1.6f + 4.2f * (float) Math.pow(1f - ri, 0.8)
-                    + 0.25f * (float) (Math.sin(x * 0.7) * Math.cos(z * 0.9)) * (1f - ri);
-            h = Math.max(h, hi);
-        }
-        return h;
+        if (ri >= 1f) return -100f;
+        return -1.6f + 4.2f * (float) Math.pow(1f - ri, 0.8)
+                + 0.25f * (float) (Math.sin(x * 0.7) * Math.cos(z * 0.9)) * (1f - ri);
+    }
+
+    static float height(float x, float z, boolean island) {
+        float h = baseHeight(x, z);
+        return island ? Math.max(h, islandHeight(x, z)) : h;
+    }
+
+    static float height(float x, float z) {
+        return height(x, z, islandEnabled);
     }
 
     static boolean isWater(float x, float z) {
         return height(x, z) < SHALLOW;
+    }
+
+    static boolean isWater(float x, float z, boolean island) {
+        return height(x, z, island) < SHALLOW;
     }
 
     // ---- surface waves (must match the water vertex shader) ----
@@ -76,7 +94,7 @@ final class World {
     /** z coordinate of the south shoreline at x = 0 (where the spectator's dock is). */
     static float southShoreZ() {
         float z = 30f;
-        while (z < 120f && height(0f, z) < 0f) z += 0.1f;
+        while (z < 120f && baseHeight(0f, z) < 0f) z += 0.1f;
         return z;
     }
 }

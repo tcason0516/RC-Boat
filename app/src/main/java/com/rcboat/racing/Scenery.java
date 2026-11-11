@@ -7,8 +7,9 @@ final class Scenery {
     static final float[] LIGHT = normalize(-0.42f, 0.70f, 0.58f);
     static final float[] FOG = {0.76f, 0.85f, 0.93f};
 
-    Mesh sky, terrain, water, props, buoyRed, buoyYellow, marker;
-    Mesh[] boats;
+    Mesh sky, terrain, water, props, island, islandProps, buoyRed, buoyYellow, marker;
+    Mesh[][] boats;     // [hull][color]
+    Mesh[] figures;     // RC drivers, one per color
 
     Scenery(Game game) {
         sky = buildSky();
@@ -18,8 +19,16 @@ final class Scenery {
         buoyRed = buildBuoy(0.95f, 0.18f, 0.12f);
         buoyYellow = buildBuoy(1.0f, 0.78f, 0.08f);
         marker = buildMarker();
-        boats = new Mesh[Game.COLORS.length];
-        for (int i = 0; i < boats.length; i++) boats[i] = buildBoat(Game.COLORS[i]);
+        island = buildIsland();
+        islandProps = buildIslandProps();
+        boats = new Mesh[Boat.HULL_NAMES.length][Game.COLORS.length];
+        figures = new Mesh[Game.COLORS.length];
+        for (int i = 0; i < Game.COLORS.length; i++) {
+            boats[Boat.V_HULL][i] = buildVHull(Game.COLORS[i]);
+            boats[Boat.HYDROPLANE][i] = buildHydroplane(Game.COLORS[i]);
+            boats[Boat.OUTRIGGER][i] = buildOutrigger(Game.COLORS[i]);
+            figures[i] = buildFigure(Game.COLORS[i]);
+        }
     }
 
     static float[] normalize(float x, float y, float z) {
@@ -103,10 +112,10 @@ final class Scenery {
             for (int i = 0; i < n; i++) {
                 float x = -World.TERRAIN_HALF + i * step;
                 float z = -World.TERRAIN_HALF + j * step;
-                float h = World.height(x, z);
+                float h = World.baseHeight(x, z);
                 float e = step * 0.5f;
-                float gx = (World.height(x + e, z) - World.height(x - e, z)) / (2 * e);
-                float gz = (World.height(x, z + e) - World.height(x, z - e)) / (2 * e);
+                float gx = (World.baseHeight(x + e, z) - World.baseHeight(x - e, z)) / (2 * e);
+                float gz = (World.baseHeight(x, z + e) - World.baseHeight(x, z - e)) / (2 * e);
                 float[] nn = normalize(-gx, 1f, -gz);
                 float[] c = groundColor(x, z, h);
                 int o = (j * n + i) * Mesh.FLOATS;
@@ -161,22 +170,133 @@ final class Scenery {
         for (int tries = 0; tries < 4000 && placed < 260; tries++) {
             float x = (rnd.nextFloat() * 2 - 1) * 165f;
             float z = (rnd.nextFloat() * 2 - 1) * 165f;
-            float h = World.height(x, z);
+            float h = World.baseHeight(x, z);
             if (h < 1.0f || h > 22f) continue;
             if (World.lakeQ(x, z) < 1.1f) continue;
-            if (Math.abs(x) < 9f && z > shoreZ - 4f && z < shoreZ + 18f) continue;
+            if (Math.abs(x) < 12f && z > shoreZ - 4f && z < shoreZ + 20f) continue;
             tree(mb, rnd, x, h, z, 0.8f + rnd.nextFloat() * 0.9f);
             placed++;
         }
-        // island trees
-        float[][] islandTrees = {{-7, -3}, {-9, 0}, {6, -4}, {8, 0}, {-3, 2}, {4, 2.5f}};
+
+        // rocks along the shore
+        for (int i = 0; i < 40; i++) {
+            double a = rnd.nextDouble() * Math.PI * 2;
+            float x = (float) Math.cos(a) * World.LAKE_A, z = (float) Math.sin(a) * World.LAKE_B;
+            // walk outwards to the waterline
+            for (int k = 0; k < 200 && World.baseHeight(x, z) < 0.1f; k++) { x *= 1.01f; z *= 1.01f; }
+            for (int k = 0; k < 200 && World.baseHeight(x, z) > 0.1f; k++) { x *= 0.995f; z *= 0.995f; }
+            if (Math.abs(x) < 10f && z > 0) continue;
+            float s = 0.4f + rnd.nextFloat() * 0.9f;
+            float g = 0.45f + rnd.nextFloat() * 0.15f;
+            mb.sphere(x, World.baseHeight(x, z), z, s * 1.3f, s * 0.7f, s, 7, 4, g, g * 0.98f, g * 0.92f);
+        }
+
+        platform(mb, game);
+
+        // boathouses on the shore
+        house(mb, 30f, shoreZ - 3f, 0.4f);
+        house(mb, -38f, shoreZ - 6f, -0.5f);
+        return mb.build();
+    }
+
+    /** The 5 ft (1.52 m) drivers' platform on the south shore. */
+    private static void platform(MeshBuilder mb, Game game) {
+        float w = Game.PLATFORM_W, d = Game.PLATFORM_D;
+        float cz = game.platformZ, top = game.deckY, ground = game.groundY;
+        float front = cz - d / 2f, back = cz + d / 2f;
+        float wr = 0.58f, wg = 0.43f, wb = 0.28f;      // planks
+        float pr = 0.45f, pg = 0.33f, pb = 0.22f;      // posts
+        // deck
+        mb.box(0, top - 0.08f, cz, w, 0.16f, d, 0, wr, wg, wb);
+        // support posts and braces
+        for (float x = -w / 2 + 0.15f; x <= w / 2; x += (w - 0.3f) / 4f) {
+            for (float z : new float[]{front + 0.15f, back - 0.15f}) {
+                float base = ground - 0.6f;
+                mb.box(x, (base + top - 0.16f) / 2f, z, 0.18f, top - 0.16f - base, 0.18f, 0, pr, pg, pb);
+            }
+            mb.box(x, ground + 0.5f, cz, 0.1f, 0.1f, d - 0.3f, 0, pr, pg, pb);
+        }
+        mb.box(0, ground + 0.6f, front + 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
+        mb.box(0, ground + 0.6f, back - 0.15f, w - 0.3f, 0.1f, 0.08f, 0, pr, pg, pb);
+        // safety railing on the front and sides
+        float rail = 1.0f;
+        for (float x = -w / 2 + 0.05f; x <= w / 2; x += (w - 0.1f) / 8f) {
+            mb.box(x, top + rail / 2f, front + 0.05f, 0.07f, rail, 0.07f, 0, pr, pg, pb);
+        }
+        mb.box(0, top + rail, front + 0.05f, w, 0.08f, 0.1f, 0, 0.92f, 0.92f, 0.9f);
+        mb.box(0, top + rail * 0.5f, front + 0.05f, w, 0.05f, 0.05f, 0, pr, pg, pb);
+        for (int s = -1; s <= 1; s += 2) {
+            float x = s * (w / 2f - 0.05f);
+            for (float z = front; z <= back; z += d / 3f) {
+                mb.box(x, top + rail / 2f, z, 0.07f, rail, 0.07f, 0, pr, pg, pb);
+            }
+            mb.box(x, top + rail, cz, 0.1f, 0.08f, d, 0, 0.92f, 0.92f, 0.9f);
+        }
+        // stairs at the back
+        int steps = 8;
+        float rise = (top - ground) / steps, tread = 0.3f;
+        for (int i = 0; i < steps; i++) {
+            float y = top - rise * (i + 1);
+            float z = back + tread * (i + 0.5f);
+            mb.box(0, y + rise / 2f - 0.02f, z, 1.3f, 0.06f, tread, 0, wr, wg, wb);
+            mb.box(0, (ground + y) / 2f, z + tread / 2f - 0.04f, 1.1f, Math.max(0.05f, y - ground), 0.05f, 0,
+                    pr, pg, pb);
+        }
+        // a sign board below the front rail
+        mb.box(0, top - 0.45f, front - 0.02f, 3.2f, 0.5f, 0.04f, 0, 0.12f, 0.32f, 0.6f);
+    }
+
+    private Mesh buildIsland() {
+        float x0 = World.ISLAND_X - World.ISLAND_RX - 1, x1 = World.ISLAND_X + World.ISLAND_RX + 1;
+        float z0 = World.ISLAND_Z - World.ISLAND_RZ - 1, z1 = World.ISLAND_Z + World.ISLAND_RZ + 1;
+        float step = 1f;
+        int nx = (int) ((x1 - x0) / step) + 1, nz = (int) ((z1 - z0) / step) + 1;
+        float[] data = new float[nx * nz * Mesh.FLOATS];
+        for (int j = 0; j < nz; j++) {
+            for (int i = 0; i < nx; i++) {
+                float x = x0 + i * step, z = z0 + j * step;
+                float h = islandSurface(x, z);
+                float e = 0.5f;
+                float gx = (islandSurface(x + e, z) - islandSurface(x - e, z)) / (2 * e);
+                float gz = (islandSurface(x, z + e) - islandSurface(x, z - e)) / (2 * e);
+                float[] nn = normalize(-gx, 1f, -gz);
+                float[] c = groundColor(x, z, h);
+                int o = (j * nx + i) * Mesh.FLOATS;
+                data[o] = x; data[o + 1] = h; data[o + 2] = z;
+                data[o + 3] = nn[0]; data[o + 4] = nn[1]; data[o + 5] = nn[2];
+                data[o + 6] = c[0]; data[o + 7] = c[1]; data[o + 8] = c[2];
+            }
+        }
+        short[] idx = new short[(nx - 1) * (nz - 1) * 6];
+        int k = 0;
+        for (int j = 0; j < nz - 1; j++) {
+            for (int i = 0; i < nx - 1; i++) {
+                int a = j * nx + i, b = a + 1, c = a + nx, dd = c + 1;
+                idx[k++] = (short) a; idx[k++] = (short) c; idx[k++] = (short) b;
+                idx[k++] = (short) b; idx[k++] = (short) c; idx[k++] = (short) dd;
+            }
+        }
+        return new Mesh(data, nx * nz, idx);
+    }
+
+    /** Island surface; where there is no island it sinks just below the lake bed. */
+    private static float islandSurface(float x, float z) {
+        float base = World.baseHeight(x, z);
+        float isl = World.islandHeight(x, z);
+        return isl > base ? isl : base - 0.08f;
+    }
+
+    private Mesh buildIslandProps() {
+        MeshBuilder mb = new MeshBuilder();
+        Random rnd = new Random(7);
+        float[][] islandTrees = {{-7, -3}, {-9, 0}, {6, -4}, {8, 0}, {-3, 2}, {4, 2.5f}, {-12, -2}, {11, -1}};
         for (float[] t : islandTrees) {
-            float h = World.height(t[0], t[1]);
+            float h = World.height(t[0], t[1], true);
             if (h > 0.3f) tree(mb, rnd, t[0], h, t[1], 0.6f + rnd.nextFloat() * 0.4f);
         }
-        // lighthouse on the island
-        float lh = World.height(World.ISLAND_X, World.ISLAND_Z) - 0.2f;
+        // lighthouse
         float lx = World.ISLAND_X, lz = World.ISLAND_Z;
+        float lh = World.height(lx, lz, true) - 0.2f;
         mb.cylinder(lx, lh, lz, 1.2f, 1.2f, 0.6f, 14, 0.55f, 0.55f, 0.55f, true);
         for (int i = 0; i < 6; i++) {
             float y0 = lh + 0.6f + i * 0.9f;
@@ -189,45 +309,12 @@ final class Scenery {
         mb.cylinder(lx, top, lz, 0.85f, 0.85f, 0.12f, 14, 0.2f, 0.2f, 0.2f, true);
         mb.cylinder(lx, top + 0.12f, lz, 0.5f, 0.5f, 0.7f, 10, 1.0f, 0.95f, 0.6f, false);
         mb.cylinder(lx, top + 0.82f, lz, 0.7f, 0f, 0.7f, 12, 0.8f, 0.12f, 0.1f, true);
+        return mb.build();
+    }
 
-        // rocks along the shore
-        for (int i = 0; i < 40; i++) {
-            double a = rnd.nextDouble() * Math.PI * 2;
-            float x = (float) Math.cos(a) * World.LAKE_A, z = (float) Math.sin(a) * World.LAKE_B;
-            // walk outwards to the waterline
-            for (int k = 0; k < 200 && World.height(x, z) < 0.1f; k++) { x *= 1.01f; z *= 1.01f; }
-            for (int k = 0; k < 200 && World.height(x, z) > 0.1f; k++) { x *= 0.995f; z *= 0.995f; }
-            if (Math.abs(x) < 8f && z > 0) continue;
-            float s = 0.4f + rnd.nextFloat() * 0.9f;
-            float g = 0.45f + rnd.nextFloat() * 0.15f;
-            mb.sphere(x, World.height(x, z), z, s * 1.3f, s * 0.7f, s, 7, 4, g, g * 0.98f, g * 0.92f);
-        }
-
-        // spectator dock
-        float dy = game.dockY;
-        float zFar = shoreZ - 7f, zNear = shoreZ + 4f;
-        mb.box(0, dy - 0.08f, (zFar + zNear) / 2f, 2.6f, 0.16f, zNear - zFar, 0, 0.55f, 0.40f, 0.26f);
-        for (float z = zFar + 0.3f; z <= zNear; z += 2.4f) {
-            for (int s = -1; s <= 1; s += 2) {
-                mb.cylinder(s * 1.2f, -2.0f, z, 0.11f, 0.11f, dy + 2.0f, 6, 0.42f, 0.30f, 0.2f, false);
-            }
-        }
-        float railStart = zFar + 3.5f;
-        for (float z = railStart; z <= zNear; z += 1.2f) {
-            for (int s = -1; s <= 1; s += 2) {
-                mb.box(s * 1.25f, dy + 0.45f, z, 0.08f, 0.9f, 0.08f, 0, 0.5f, 0.36f, 0.24f);
-            }
-        }
-        // rails (stop short of the far end so the spectator's view over the lake is clear)
-        mb.box(-1.25f, dy + 0.9f, (railStart + zNear) / 2f, 0.07f, 0.07f, zNear - railStart, 0, 0.5f, 0.36f, 0.24f);
-        mb.box(1.25f, dy + 0.9f, (railStart + zNear) / 2f, 0.07f, 0.07f, zNear - railStart, 0, 0.5f, 0.36f, 0.24f);
-
-        // boathouses on the shore
-        house(mb, 30f, shoreZ - 3f, 0.4f);
-        house(mb, -38f, shoreZ - 6f, -0.5f);
-
-        // start / finish gate
-        Track t = game.track;
+    /** Start / finish gate for a track. */
+    static Mesh buildGate(Track t) {
+        MeshBuilder mb = new MeshBuilder();
         float nx = t.nx(0), nz = t.nz(0);
         float span = Track.HALF_WIDTH + 1.0f;
         float rot = (float) Math.atan2(-nz, nx);
@@ -250,6 +337,33 @@ final class Scenery {
         return mb.build();
     }
 
+    /** An RC driver holding a transmitter. Local forward is -z, feet at y = 0. */
+    private static Mesh buildFigure(float[] col) {
+        MeshBuilder mb = new MeshBuilder();
+        float[] pants = {0.16f, 0.2f, 0.32f};
+        float[] skin = {0.92f, 0.74f, 0.6f};
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 0.1f, 0.43f, 0, 0.15f, 0.86f, 0.17f, 0, pants[0], pants[1], pants[2]);
+            mb.box(s * 0.1f, 0.04f, -0.04f, 0.15f, 0.08f, 0.27f, 0, 0.1f, 0.1f, 0.1f);
+            // upper arm, forearm, hand
+            mb.box(s * 0.25f, 1.22f, -0.03f, 0.1f, 0.34f, 0.11f, 0, col[0], col[1], col[2]);
+            mb.box(s * 0.2f, 1.07f, -0.2f, 0.09f, 0.09f, 0.34f, 0, col[0], col[1], col[2]);
+            mb.box(s * 0.13f, 1.1f, -0.38f, 0.07f, 0.08f, 0.08f, 0, skin[0], skin[1], skin[2]);
+        }
+        mb.box(0, 0.93f, 0, 0.36f, 0.14f, 0.21f, 0, pants[0], pants[1], pants[2]);
+        mb.box(0, 1.2f, 0, 0.42f, 0.5f, 0.24f, 0, col[0], col[1], col[2]);
+        mb.box(0, 1.36f, -0.005f, 0.3f, 0.06f, 0.2f, 0, col[0] * 0.8f, col[1] * 0.8f, col[2] * 0.8f);
+        mb.cylinder(0, 1.44f, 0, 0.06f, 0.06f, 0.08f, 8, skin[0], skin[1], skin[2], false);
+        mb.sphere(0, 1.62f, 0, 0.11f, 0.13f, 0.12f, 10, 6, skin[0], skin[1], skin[2]);
+        // cap
+        mb.sphere(0, 1.69f, 0.005f, 0.12f, 0.07f, 0.125f, 10, 4, col[0], col[1], col[2]);
+        mb.box(0, 1.69f, -0.13f, 0.18f, 0.02f, 0.1f, 0, col[0] * 0.7f, col[1] * 0.7f, col[2] * 0.7f);
+        // transmitter + antenna
+        mb.box(0, 1.12f, -0.43f, 0.26f, 0.15f, 0.09f, 0, 0.12f, 0.12f, 0.14f);
+        mb.box(0.08f, 1.36f, -0.46f, 0.015f, 0.42f, 0.015f, 0, 0.8f, 0.8f, 0.82f);
+        return mb.build();
+    }
+
     private static void tree(MeshBuilder mb, Random rnd, float x, float h, float z, float s) {
         mb.cylinder(x, h - 0.2f, z, 0.22f * s, 0.16f * s, 1.6f * s, 6, 0.40f, 0.28f, 0.18f, false);
         float g = 0.75f + rnd.nextFloat() * 0.35f;
@@ -267,10 +381,10 @@ final class Scenery {
 
     private static void house(MeshBuilder mb, float x, float z, float rot) {
         // find ground just above the waterline nearby
-        float h = World.height(x, z);
+        float h = World.baseHeight(x, z);
         for (int k = 0; k < 100 && h < 0.5f; k++) {
             z += 0.3f;
-            h = World.height(x, z);
+            h = World.baseHeight(x, z);
         }
         float w = 5f, d = 4f, wall = 2.6f;
         mb.box(x, h + wall / 2f - 0.3f, z, w, wall, d, rot, 0.86f, 0.80f, 0.70f);
@@ -310,60 +424,140 @@ final class Scenery {
         return mb.build();
     }
 
-    /** RC speed boat, ~1.3 m long. Local forward is -z. */
-    private static Mesh buildBoat(float[] col) {
-        MeshBuilder mb = new MeshBuilder();
-        float[] st = {-0.70f, -0.52f, -0.32f, 0.0f, 0.35f, 0.62f};     // stations along z
-        float[] hw = {0.0f, 0.13f, 0.20f, 0.25f, 0.26f, 0.25f};         // deck half widths
-        float[] deckY = {0.20f, 0.18f, 0.17f, 0.16f, 0.16f, 0.16f};
-        float[] chineY = {0.12f, 0.05f, 0.02f, 0.0f, 0.0f, 0.0f};
-        float[] keelY = {0.12f, -0.03f, -0.08f, -0.10f, -0.10f, -0.09f};
-        float[] ref = {0, 0.04f, 0.05f};
-        float[] side = col;
-        float[] bottom = {col[0] * 0.35f, col[1] * 0.35f, col[2] * 0.35f};
-        float[] deck = {0.96f, 0.96f, 0.96f};
+    /**
+     * A tapered hull pod centred on x = cx: stations along z (bow first) with deck half
+     * widths, deck / chine / keel heights. Sides get a dark stripe.
+     */
+    private static void pod(MeshBuilder mb, float cx, float[] st, float[] hw, float[] deckY,
+                            float[] chineY, float[] keelY, float[] side, float[] bottom, float[] deck,
+                            int coloredDeckStations) {
+        float[] ref = {cx, (deckY[2] + keelY[2]) / 2f, (st[0] + st[st.length - 1]) / 2f};
         float[] stripe = {0.1f, 0.1f, 0.12f};
         int n = st.length;
         for (int i = 0; i < n - 1; i++) {
             for (int s = -1; s <= 1; s += 2) {
-                float[] d0 = {s * hw[i], deckY[i], st[i]}, d1 = {s * hw[i + 1], deckY[i + 1], st[i + 1]};
-                float[] c0 = {s * hw[i] * 0.95f, chineY[i], st[i]}, c1 = {s * hw[i + 1] * 0.95f, chineY[i + 1], st[i + 1]};
-                float[] m0 = {s * hw[i] * 0.975f, (deckY[i] + chineY[i]) * 0.5f - 0.015f, st[i]};
-                float[] m1 = {s * hw[i + 1] * 0.975f, (deckY[i + 1] + chineY[i + 1]) * 0.5f - 0.015f, st[i + 1]};
-                float[] m0b = {m0[0], m0[1] + 0.025f, m0[2]}, m1b = {m1[0], m1[1] + 0.025f, m1[2]};
-                float[] k0 = {0, keelY[i], st[i]}, k1 = {0, keelY[i + 1], st[i + 1]};
+                float[] d0 = {cx + s * hw[i], deckY[i], st[i]}, d1 = {cx + s * hw[i + 1], deckY[i + 1], st[i + 1]};
+                float[] c0 = {cx + s * hw[i] * 0.95f, chineY[i], st[i]};
+                float[] c1 = {cx + s * hw[i + 1] * 0.95f, chineY[i + 1], st[i + 1]};
+                float[] m0 = {cx + s * hw[i] * 0.975f, (deckY[i] + chineY[i]) * 0.5f - 0.012f, st[i]};
+                float[] m1 = {cx + s * hw[i + 1] * 0.975f, (deckY[i + 1] + chineY[i + 1]) * 0.5f - 0.012f, st[i + 1]};
+                float[] m0b = {m0[0], m0[1] + 0.022f, m0[2]}, m1b = {m1[0], m1[1] + 0.022f, m1[2]};
+                float[] k0 = {cx, keelY[i], st[i]}, k1 = {cx, keelY[i + 1], st[i + 1]};
                 mb.quad(d0, d1, m1b, m0b, ref, side);
                 mb.quad(m0b, m1b, m1, m0, ref, stripe);
                 mb.quad(m0, m1, c1, c0, ref, side);
                 mb.quad(c0, c1, k1, k0, ref, bottom);
             }
-            float[] dl0 = {-hw[i], deckY[i], st[i]}, dr0 = {hw[i], deckY[i], st[i]};
-            float[] dl1 = {-hw[i + 1], deckY[i + 1], st[i + 1]}, dr1 = {hw[i + 1], deckY[i + 1], st[i + 1]};
-            float[] deckCol = i < 2 ? col : deck;
-            mb.quad(dl0, dr0, dr1, dl1, new float[]{0, -1, 0}, deckCol);
+            float[] dl0 = {cx - hw[i], deckY[i], st[i]}, dr0 = {cx + hw[i], deckY[i], st[i]};
+            float[] dl1 = {cx - hw[i + 1], deckY[i + 1], st[i + 1]}, dr1 = {cx + hw[i + 1], deckY[i + 1], st[i + 1]};
+            mb.quad(dl0, dr0, dr1, dl1, new float[]{cx, -1, 0}, i < coloredDeckStations ? side : deck);
         }
-        // transom
         int l = n - 1;
-        float[] tdl = {-hw[l], deckY[l], st[l]}, tdr = {hw[l], deckY[l], st[l]};
-        float[] tcl = {-hw[l] * 0.95f, chineY[l], st[l]}, tcr = {hw[l] * 0.95f, chineY[l], st[l]};
-        float[] tk = {0, keelY[l], st[l]};
-        float[] tref = {0, 0.05f, 0f};
+        float[] tdl = {cx - hw[l], deckY[l], st[l]}, tdr = {cx + hw[l], deckY[l], st[l]};
+        float[] tcl = {cx - hw[l] * 0.95f, chineY[l], st[l]}, tcr = {cx + hw[l] * 0.95f, chineY[l], st[l]};
+        float[] tk = {cx, keelY[l], st[l]};
+        float[] tref = {cx, (deckY[l] + keelY[l]) / 2f, st[l] - 0.3f};
         mb.quad(tdl, tdr, tcr, tcl, tref, side);
         mb.tri(tcl, tcr, tk, tref, bottom);
+    }
 
+    private static float[] dark(float[] c, float k) {
+        return new float[]{c[0] * k, c[1] * k, c[2] * k};
+    }
+
+    private static final float[] WHITE = {0.96f, 0.96f, 0.96f};
+
+    /** Deep-V speed boat, ~1.3 m long. Local forward is -z. */
+    private static Mesh buildVHull(float[] col) {
+        MeshBuilder mb = new MeshBuilder();
+        pod(mb, 0,
+                new float[]{-0.70f, -0.52f, -0.32f, 0.0f, 0.35f, 0.62f},
+                new float[]{0.0f, 0.13f, 0.20f, 0.25f, 0.26f, 0.25f},
+                new float[]{0.20f, 0.18f, 0.17f, 0.16f, 0.16f, 0.16f},
+                new float[]{0.12f, 0.05f, 0.02f, 0.0f, 0.0f, 0.0f},
+                new float[]{0.12f, -0.03f, -0.08f, -0.10f, -0.10f, -0.09f},
+                col, dark(col, 0.35f), WHITE, 2);
         // canopy / cockpit
         mb.box(0, 0.215f, 0.10f, 0.30f, 0.11f, 0.46f, 0, 0.08f, 0.10f, 0.13f);
         mb.box(0, 0.28f, 0.16f, 0.26f, 0.04f, 0.32f, 0, col[0], col[1], col[2]);
-        // windshield wedge
         float[] w0 = {-0.15f, 0.16f, -0.13f}, w1 = {0.15f, 0.16f, -0.13f};
         float[] w2 = {0.15f, 0.27f, -0.02f}, w3 = {-0.15f, 0.27f, -0.02f};
         mb.quad(w0, w1, w2, w3, new float[]{0, 0.1f, 0.2f}, new float[]{0.15f, 0.25f, 0.32f});
-        // stern details: rudder, prop strut, antenna
+        // stern details: rudder, prop strut, antenna, number plate
         mb.box(0.12f, -0.05f, 0.66f, 0.02f, 0.16f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(0, -0.08f, 0.66f, 0.03f, 0.03f, 0.1f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(-0.15f, 0.36f, 0.42f, 0.012f, 0.4f, 0.012f, 0, 0.08f, 0.08f, 0.08f);
-        // racing number plates
         mb.box(0, 0.165f, 0.48f, 0.3f, 0.01f, 0.14f, 0, 0.97f, 0.97f, 0.97f);
+        return mb.build();
+    }
+
+    /** Three-point hydroplane: two front sponsons and a raised centre body with a rear wing. */
+    private static Mesh buildHydroplane(float[] col) {
+        MeshBuilder mb = new MeshBuilder();
+        for (int s = -1; s <= 1; s += 2) {
+            pod(mb, s * 0.27f,
+                    new float[]{-0.70f, -0.58f, -0.38f, -0.10f},
+                    new float[]{0.0f, 0.06f, 0.08f, 0.08f},
+                    new float[]{0.16f, 0.15f, 0.15f, 0.15f},
+                    new float[]{0.09f, 0.02f, 0.0f, 0.0f},
+                    new float[]{0.08f, 0.01f, -0.01f, -0.01f},
+                    col, dark(col, 0.35f), col, 0);
+        }
+        // tunnel deck joining the sponsons
+        mb.box(0, 0.14f, -0.36f, 0.56f, 0.04f, 0.52f, 0, WHITE[0], WHITE[1], WHITE[2]);
+        // centre body riding high, on the prop at the back
+        pod(mb, 0,
+                new float[]{-0.45f, -0.15f, 0.25f, 0.62f},
+                new float[]{0.10f, 0.16f, 0.16f, 0.13f},
+                new float[]{0.19f, 0.22f, 0.22f, 0.21f},
+                new float[]{0.12f, 0.08f, 0.07f, 0.07f},
+                new float[]{0.11f, 0.05f, 0.04f, 0.05f},
+                col, dark(col, 0.35f), WHITE, 0);
+        // cockpit canopy
+        mb.box(0, 0.27f, 0.02f, 0.2f, 0.1f, 0.42f, 0, 0.08f, 0.1f, 0.13f);
+        mb.sphere(0, 0.30f, -0.18f, 0.1f, 0.07f, 0.12f, 8, 4, 0.15f, 0.25f, 0.32f);
+        // rear wing on two fins
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 0.12f, 0.33f, 0.55f, 0.02f, 0.2f, 0.12f, 0, col[0], col[1], col[2]);
+        }
+        mb.box(0, 0.44f, 0.56f, 0.38f, 0.025f, 0.13f, 0, WHITE[0], WHITE[1], WHITE[2]);
+        // prop strut, rudder, antenna
+        mb.box(0, 0.0f, 0.66f, 0.03f, 0.12f, 0.08f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(0.1f, -0.01f, 0.6f, 0.02f, 0.14f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(-0.1f, 0.42f, 0.3f, 0.012f, 0.4f, 0.012f, 0, 0.08f, 0.08f, 0.08f);
+        return mb.build();
+    }
+
+    /** Outrigger: a slim centre hull with two small sponsons on booms. */
+    private static Mesh buildOutrigger(float[] col) {
+        MeshBuilder mb = new MeshBuilder();
+        pod(mb, 0,
+                new float[]{-0.74f, -0.52f, -0.2f, 0.2f, 0.62f},
+                new float[]{0.0f, 0.08f, 0.11f, 0.12f, 0.11f},
+                new float[]{0.17f, 0.16f, 0.16f, 0.16f, 0.16f},
+                new float[]{0.10f, 0.03f, 0.0f, 0.0f, 0.0f},
+                new float[]{0.10f, -0.04f, -0.07f, -0.07f, -0.06f},
+                col, dark(col, 0.35f), WHITE, 1);
+        for (int s = -1; s <= 1; s += 2) {
+            pod(mb, s * 0.37f,
+                    new float[]{-0.74f, -0.6f, -0.36f, -0.14f},
+                    new float[]{0.0f, 0.045f, 0.055f, 0.05f},
+                    new float[]{0.12f, 0.12f, 0.12f, 0.12f},
+                    new float[]{0.07f, 0.02f, 0.01f, 0.01f},
+                    new float[]{0.06f, 0.0f, -0.01f, 0.0f},
+                    WHITE, dark(col, 0.35f), col, 4);
+        }
+        // booms
+        for (float z : new float[]{-0.56f, -0.24f}) {
+            mb.box(0, 0.145f, z, 0.76f, 0.03f, 0.05f, 0, 0.7f, 0.7f, 0.72f);
+        }
+        // canopy, tail fin, rudder, antenna
+        mb.box(0, 0.22f, 0.12f, 0.18f, 0.1f, 0.38f, 0, 0.08f, 0.1f, 0.13f);
+        mb.box(0, 0.28f, 0.15f, 0.15f, 0.03f, 0.28f, 0, col[0], col[1], col[2]);
+        mb.box(0, 0.3f, 0.52f, 0.02f, 0.26f, 0.18f, 0, col[0], col[1], col[2]);
+        mb.box(0.09f, -0.05f, 0.62f, 0.02f, 0.15f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(0, -0.07f, 0.66f, 0.03f, 0.03f, 0.1f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(-0.08f, 0.38f, 0.38f, 0.012f, 0.4f, 0.012f, 0, 0.08f, 0.08f, 0.08f);
         return mb.build();
     }
 }

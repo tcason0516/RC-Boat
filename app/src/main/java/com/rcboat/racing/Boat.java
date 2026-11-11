@@ -10,17 +10,29 @@ final class Boat {
     static final float REVERSE_MAX = 3.5f;
     static final float TURN_RATE = 2.3f;        // rad/s at full lock
 
+    // Hull types: name, top speed (m/s), acceleration, turn rate, side grip
+    static final int V_HULL = 0, HYDROPLANE = 1, OUTRIGGER = 2;
+    static final String[] HULL_NAMES = {"V-Hull", "Hydroplane", "Outrigger"};
+    static final String[] HULL_INFO = {"Balanced all-rounder", "Fastest, slides in turns", "Grippy, sharp turns"};
+    private static final float[][] HULL_STATS = {
+            {12.8f, 7.6f, 2.30f, 3.2f},
+            {13.2f, 8.0f, 1.85f, 1.6f},
+            {13.0f, 7.1f, 2.60f, 4.8f},
+    };
+
     final int id;
     final String name;
     final float r, g, b;
     final boolean isPlayer;
+    final int hull;
+    final float topSpeed, accel, turnRate, grip;
 
     // physics
     float x, z, heading;
     float vx, vz;
     float yawRate;
     float throttle, steer;     // inputs, -1..1
-    float maxSpeed = BASE_MAX_SPEED;
+    float maxSpeed;
     float speedMul = 1f;       // AI skill / rubber band
 
     // visuals
@@ -44,8 +56,15 @@ final class Boat {
     float wrongWayTime;
     float lastAlong;
 
-    Boat(int id, String name, float[] color, boolean isPlayer, Random rnd) {
+    Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
+        this.hull = hull;
+        float[] st = HULL_STATS[hull];
+        this.topSpeed = st[0];
+        this.accel = st[1];
+        this.turnRate = st[2];
+        this.grip = st[3];
+        this.maxSpeed = topSpeed;
         this.name = name;
         this.r = color[0];
         this.g = color[1];
@@ -121,18 +140,18 @@ final class Boat {
         float vs = vx * rx + vz * rz;
 
         float top = maxSpeed * speedMul;
-        float drag = ACCEL / (top * top);
+        float drag = accel / (top * top);
         float acc;
-        if (throttle >= 0) acc = throttle * ACCEL;
-        else acc = vf > 0.5f ? throttle * ACCEL * 1.4f : throttle * ACCEL * 0.6f;
+        if (throttle >= 0) acc = throttle * accel;
+        else acc = vf > 0.5f ? throttle * accel * 1.4f : throttle * accel * 0.6f;
         vf += acc * dt;
         vf -= drag * vf * Math.abs(vf) * dt;
         vf -= vf * 0.12f * dt;                 // water friction
         if (vf < -REVERSE_MAX) vf = -REVERSE_MAX;
-        vs *= (float) Math.exp(-3.2f * dt);    // side grip (lets boats slide a little)
+        vs *= (float) Math.exp(-grip * dt);    // side grip (lets boats slide a little)
 
         float authority = clamp(vf / 3.5f, -1f, 1f);
-        float rate = TURN_RATE * (1f - 0.25f * clamp(vf / top, 0f, 1f));
+        float rate = turnRate * (1f - 0.25f * clamp(vf / top, 0f, 1f));
         float targetYaw = -steer * rate * authority;
         yawRate += (targetYaw - yawRate) * Math.min(1f, dt * 7f);
         heading = wrapAngle(heading + yawRate * dt);
@@ -153,16 +172,22 @@ final class Boat {
         roll += (targetRoll - roll) * Math.min(1f, dt * 4f);
     }
 
+    /** Wave-induced extra pitch and roll: out[0] = pitch, out[1] = roll; also updates y. */
+    void waveAttitude(float time, float[] out) {
+        y = World.wave(x, z, time);
+        float wdx = World.waveDx(x, z, time), wdz = World.waveDz(x, z, time);
+        out[0] = -(wdx * fwdX() + wdz * fwdZ()) * 2f;
+        out[1] = (wdx * rightX() + wdz * rightZ()) * 2f;
+    }
+
+    private final float[] att = new float[2];
+
     /** Model matrix (column-major, like android.opengl.Matrix) of the boat. */
     void modelMatrix(float[] m, float time) {
-        float wy = World.wave(x, z, time);
-        float wdx = World.waveDx(x, z, time), wdz = World.waveDz(x, z, time);
-        y = wy;
-        float fx = fwdX(), fz = fwdZ();
-        float wavePitch = -(wdx * fx + wdz * fz);
-        float waveRoll = (wdx * rightX() + wdz * rightZ());
-        float p = pitch + wavePitch * 2f;
-        float rl = roll + waveRoll * 2f;
+        waveAttitude(time, att);
+        float p = pitch + att[0];
+        float rl = roll + att[1];
+        if (hull == HYDROPLANE) p += 0.02f * clamp(forwardSpeed() / topSpeed, 0f, 1f);
         android.opengl.Matrix.setIdentityM(m, 0);
         android.opengl.Matrix.translateM(m, 0, x, y, z);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(heading), 0, 1, 0);

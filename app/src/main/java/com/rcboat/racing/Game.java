@@ -264,7 +264,7 @@ final class Game {
                     if (!voice) beepRequest = 1040;
                     setMessage("GO!", 1.0f);
                     announcer.enabled = announcerOn;
-                    announcer.say("go", 0, "count", 0f, Announcer.URGENT);
+                    announcer.say("go", 2, "count", 0f, Announcer.URGENT);
                 } else if (after != before && after <= 3) {
                     if (!voice) beepRequest = 520;
                     announcer.enabled = announcerOn;
@@ -485,7 +485,7 @@ final class Game {
 
         if (annStartDelay > 0) {
             annStartDelay -= dt;
-            if (annStartDelay <= 0) a.say("start", 1, "start", 0f, Announcer.URGENT);
+            if (annStartDelay <= 0) a.say("start", 5, "start", 0f, Announcer.URGENT);
         }
         if (state == State.COUNTDOWN) return;
 
@@ -494,12 +494,10 @@ final class Game {
             annWinSaid = true;
             Boat w = order[0];
             if (w.isPlayer) {
-                a.say("winme", 2, "win", 0f, Announcer.URGENT);
+                a.say("winme", 3, "win", 0f, Announcer.URGENT);
                 annFinishSaid = true;
             } else {
-                // the voice pack names "Player 1" to "Player 4": opponents 1-3 can be named
-                if (w.id <= 3) a.say("winopp_" + w.id, 0, "win", 0f, Announcer.URGENT);
-                else a.say("winoppgen", 0, "win", 0f, Announcer.URGENT);
+                a.say("winopp_" + w.id, 0, "win", 0f, Announcer.URGENT);
             }
         }
         if (p.finished) {
@@ -508,7 +506,10 @@ final class Game {
                 annFinishDelay -= dt;
                 if (annFinishDelay <= 0) {
                     annFinishSaid = true;
-                    a.say("fin_" + positionOf(p), 0, "finish", 0f, Announcer.URGENT);
+                    int fp = positionOf(p);
+                    // last place gets its own joke half the time
+                    String key = fp == boats.length && fp > 2 && Math.random() < 0.5 ? "fin_last" : "fin_" + fp;
+                    a.say(key, 0, "finish", 0f, Announcer.URGENT);
                 }
             }
             evBuoy = evShore = evBump = false;
@@ -523,7 +524,8 @@ final class Game {
         if (leadLap > annLeaderLap) {
             annLeaderLap = leadLap;
             int toGo = laps - leadLap + 1;
-            if (toGo == 1) a.say("white", 2, "laps", 0f, Announcer.URGENT);
+            if (toGo == 1) a.say("white", 3, "laps", 0f, Announcer.URGENT);
+            else if (toGo == 2) a.say("togo_2", 2, "laps", 0f, Announcer.IMPORTANT);
             else if (toGo <= 8) a.say("togo_" + toGo, 0, "laps", 0f, Announcer.IMPORTANT);
         }
 
@@ -532,9 +534,9 @@ final class Game {
         int leader = order.length > 0 ? order[0].id : -1;
         if (leader != annLeader) {
             if (settled && annLeader >= 0 && boats.length > 1) {
-                if (leader == p.id) a.say("leadme", 2, "lead", 4f, Announcer.IMPORTANT);
-                else if (leader <= 3) a.say("lead_" + leader, 0, "lead", 4f, Announcer.IMPORTANT);
-                else if (annLeader == p.id) a.say("leadlost", 1, "lead", 4f, Announcer.IMPORTANT);
+                if (leader == p.id) a.say("leadme", 5, "lead", 4f, Announcer.IMPORTANT);
+                else if (annLeader == p.id) a.say("leadlost", 4, "lead", 4f, Announcer.IMPORTANT);
+                else a.say("lead_" + leader, leader == 5 ? 3 : 2, "lead", 4f, Announcer.IMPORTANT);
             }
             annLeader = leader;
         }
@@ -543,28 +545,28 @@ final class Game {
             if (settled && annPrevPos > 0) {
                 if (pos < annPrevPos) {
                     if (pos > 1) {
-                        a.say("upgen", 2, "position", 5f, Announcer.NORMAL);
+                        a.say("upgen", 4, "position", 5f, Announcer.NORMAL);
                     }
                 } else if (annPrevPos != 1) {   // losing the lead has its own call
-                    a.say("down", 1, "position", 5f, Announcer.NORMAL);
+                    a.say("down", 3, "position", 5f, Announcer.NORMAL);
                 }
             }
             annPrevPos = pos;
         }
 
         // ---- incidents ----
-        if (evBump) a.say("bump", 3, "bump", 9f, Announcer.NORMAL);
-        if (evBuoy) a.say("buoy", 1, "buoy", 9f, Announcer.NORMAL);
-        if (p.wrongWayTime > 1.5f && annPrevWrong <= 1.5f) a.say("wrong", 3, "wrong", 10f, Announcer.IMPORTANT);
-        if ((p.offCourseTime > 2f && annPrevOff <= 2f) || evShore) a.say("off", 1, "off", 12f, Announcer.NORMAL);
+        if (evBump) a.say("bump", 5, "bump", 9f, Announcer.NORMAL);
+        if (evBuoy) a.say("buoy", 3, "buoy", 9f, Announcer.NORMAL);
+        if (p.wrongWayTime > 1.5f && annPrevWrong <= 1.5f) a.say("wrong", 4, "wrong", 10f, Announcer.IMPORTANT);
+        if ((p.offCourseTime > 2f && annPrevOff <= 2f) || evShore) a.say("off", 3, "off", 12f, Announcer.NORMAL);
         annPrevWrong = p.wrongWayTime;
         annPrevOff = p.offCourseTime;
         evBuoy = evShore = evBump = false;
 
         // ---- color commentary when it has been quiet for a while ----
         if (raceTime > 8f && a.quietFor() > 20f && boats.length > 1) {
-            if (pos == boats.length) a.say("last", 1, "color", 25f, Announcer.NORMAL);
-            else if (pos == 1) a.say("front", 3, "color", 25f, Announcer.NORMAL);
+            if (pos == boats.length) a.say("last", 3, "color", 25f, Announcer.NORMAL);
+            else if (pos == 1) a.say("front", 4, "color", 25f, Announcer.NORMAL);
         }
     }
 

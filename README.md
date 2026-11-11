@@ -41,8 +41,9 @@ Ground, rock, bark, plank and sky photographs are public-domain (CC0) assets fro
 [Poly Haven](https://polyhaven.com) and [ambientCG](https://ambientcg.com).
 See `tools/textures/README.md` for the list.
 
-Announcer voice: "Announcer Voice Pack" by Dan Bosley (@daniconshow),
-<https://daniconshow.itch.io/basic-announcer-voice-pack>. See `tools/announcer/README.md`.
+Announcer voice: generated with the [Maya1](https://huggingface.co/maya-research/maya1) text-to-speech
+model (Apache 2.0) and the [SNAC](https://github.com/hubertsiuzdak/snac) audio codec (MIT).
+See `tools/announcer/README.md`.
 
 ## Building yourself
 

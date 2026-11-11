@@ -1,0 +1,48 @@
+name: Fetch voice model
+
+# Manual-only helper: copies the Maya1 TTS model from Hugging Face into a
+# GitHub release so the announcer clips can be rendered offline. Not part
+# of the app build; delete the "voice-model" release when no longer needed.
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Hugging Face model repo
+        default: Mungert/maya1-GGUF
+      pattern:
+        description: File name suffix to fetch
+        default: q4_k_m.gguf
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download from Hugging Face
+        run: |
+          set -e
+          curl -sSfL "https://huggingface.co/api/models/${{ inputs.repo }}" -o info.json
+          python3 - <<'EOF' > fname
+          import json
+          files = [s['rfilename'] for s in json.load(open('info.json'))['siblings']]
+          print('\n'.join(files), file=__import__('sys').stderr)
+          m = [f for f in files if f.lower().endswith('${{ inputs.pattern }}'.lower())]
+          print(m[0])
+          EOF
+          F=$(cat fname); echo "Fetching $F"
+          curl -sSfL "https://huggingface.co/${{ inputs.repo }}/resolve/main/$F" -o model.gguf
+          ls -la model.gguf
+          sha256sum model.gguf | tee model.sha256
+          split -b 1500M -d model.gguf model.gguf.part
+          ls -la
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete voice-model -y --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+          gh release create voice-model -R "$GITHUB_REPOSITORY" --prerelease \
+            --title "Voice model (temporary)" \
+            --notes "Maya1 (Apache 2.0) from ${{ inputs.repo }}, split into parts. Temporary, used to render announcer clips." \
+            model.gguf.part* model.sha256 fname

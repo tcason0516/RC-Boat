@@ -3,7 +3,6 @@ package com.rcboat.racing;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.media.MediaPlayer;
-import android.os.SystemClock;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -58,10 +57,8 @@ final class HudView extends View {
     private final Stick left = new Stick(), right = new Stick();
     private float u;  // 1% of the screen's short side
 
-    // trash talk bubble + voice
+    // trash talk voice
     private int talkSeq;
-    private int talkSpeaker, talkLine = -1;
-    private long talkUntil;
     private MediaPlayer voice;
 
     HudView(Context ctx, Game game) {
@@ -227,11 +224,6 @@ final class HudView extends View {
             drawSticks(c);
         } else {
             releaseSticks();
-        }
-
-        // ---- trash talk bubble ----
-        if (talkLine >= 0 && SystemClock.uptimeMillis() < talkUntil && game.talkOn) {
-            drawTalk(c, w, talkSpeaker, talkLine);
         }
 
         // ---- overlays ----
@@ -403,69 +395,7 @@ final class HudView extends View {
 
     // ------------------------------------------------------------------ trash talk
 
-    private void drawTalk(Canvas c, int w, int speaker, int line) {
-        float maxW = Math.min(w - 92 * u, 150 * u);
-        float size = 4.2f * u;
-        text.setTextSize(size);
-        java.util.List<String> rows = wrap(TrashTalk.LINES[line], maxW - 8 * u);
-        float bw = 8 * u;
-        for (String r : rows) bw = Math.max(bw, text.measureText(r) + 8 * u);
-        text.setTextSize(3.4f * u);
-        String who = TrashTalk.DRIVERS[speaker] + "  (" + Game.NAMES[speaker] + ")";
-        bw = Math.max(bw, text.measureText(who) + 14 * u);
-        float bh = 9 * u + rows.size() * size * 1.2f;
-        float x = (w - bw) / 2f, y = 13 * u;
-        float[] col = Game.COLORS[speaker];
-        int rgb = Color.rgb((int) (col[0] * 255), (int) (col[1] * 255), (int) (col[2] * 255));
-        rect.set(x, y, x + bw, y + bh);
-        fill.setColor(0xE6FFFFFF);
-        c.drawRoundRect(rect, 3 * u, 3 * u, fill);
-        stroke.setColor(rgb);
-        stroke.setStrokeWidth(0.7f * u);
-        c.drawRoundRect(rect, 3 * u, 3 * u, stroke);
-        // little speech-bubble tail
-        path.reset();
-        path.moveTo(x + 8 * u, y + bh);
-        path.lineTo(x + 6 * u, y + bh + 3 * u);
-        path.lineTo(x + 12 * u, y + bh);
-        path.close();
-        fill.setColor(0xE6FFFFFF);
-        c.drawPath(path, fill);
-        fill.setColor(rgb);
-        c.drawCircle(x + 5 * u, y + 4.6f * u, 1.6f * u, fill);
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setColor(0xFF33414D);
-        c.drawText(who, x + 8 * u, y + 5.8f * u, text);
-        text.setTextSize(size);
-        text.setColor(0xFF111111);
-        float ty = y + 7.5f * u + size;
-        for (String r : rows) {
-            c.drawText(r, x + 4 * u, ty, text);
-            ty += size * 1.2f;
-        }
-    }
-
-    private java.util.List<String> wrap(String s, float maxW) {
-        java.util.ArrayList<String> out = new java.util.ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        for (String word : s.split(" ")) {
-            String trial = cur.length() == 0 ? word : cur + " " + word;
-            if (text.measureText(trial) > maxW && cur.length() > 0) {
-                out.add(cur.toString());
-                cur = new StringBuilder(word);
-            } else {
-                cur = new StringBuilder(trial);
-            }
-        }
-        if (cur.length() > 0) out.add(cur.toString());
-        return out;
-    }
-
     private void startTalk(int speaker, int line, boolean withVoice) {
-        talkSpeaker = speaker;
-        talkLine = line;
-        long now = SystemClock.uptimeMillis();
-        talkUntil = now + 1800 + TrashTalk.LINES[line].length() * 55L;
         stopVoice();
         if (!withVoice) return;
         try {
@@ -483,7 +413,6 @@ final class HudView extends View {
             mp.start();
             voice = mp;
             game.talking = true;
-            talkUntil = Math.max(talkUntil, now + mp.getDuration() + 900);
         } catch (Exception e) {
             game.talking = false;
         }

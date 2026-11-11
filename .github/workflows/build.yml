@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -38,6 +38,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
+          # remove any leftover draft releases from earlier runs
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" -q '.[] | select(.draft) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" || true
+          done
           gh release create latest RCBoatRacing.apk \
+            --target "$GITHUB_SHA" \
             --title "RC Boat Racing (latest build)" \
             --notes "Built from ${GITHUB_SHA::7}. Open this page on your Android phone and tap RCBoatRacing.apk to download and install."
+          gh release edit latest --draft=false --latest

@@ -129,8 +129,8 @@ final class HudView extends View {
         float incX = rightEdge - bs;
         float decX = incX - valueW - bs;
         float by = y + (rh - bs) / 2f;
-        button(c, decX, by, bs, bs, "◀", 0xFF35506A, 4 * u, dec);
-        button(c, incX, by, bs, bs, "▶", 0xFF35506A, 4 * u, inc);
+        button(c, decX, by, bs, bs, "<", 0xFF35506A, 4 * u, dec);
+        button(c, incX, by, bs, bs, ">", 0xFF35506A, 4 * u, inc);
         textC(c, value, decX + bs + valueW / 2f, y + rh * 0.62f, 4.6f * u, Color.WHITE);
         return y + rh;
     }

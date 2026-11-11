@@ -47,6 +47,3 @@ jobs:
             --title "RC Boat Racing (latest build)" \
             --notes "Built from ${GITHUB_SHA::7}. Open this page on your Android phone and tap RCBoatRacing.apk to download and install."
           gh release edit latest --draft=false --latest
-          echo "--- release state after publish ---"
-          gh api "repos/$GITHUB_REPOSITORY/releases" -q '.[] | {id, tag_name, draft, immutable, html_url}'
-          gh api "repos/$GITHUB_REPOSITORY/immutable-releases" || true

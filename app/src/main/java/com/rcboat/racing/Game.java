@@ -564,6 +564,7 @@ final class Game {
                 break;
         }
 
+        if (lifeSize) for (Boat b : boats) b.smoothAttitude(time, dt);
         if (player != null && state != State.MENU) announce(dt);
 
         if (player != null && state != State.MENU) {
@@ -1176,8 +1177,8 @@ final class Game {
             // and it is low-pass filtered so wave chop gives a gentle sway, not a shake.
             b.waveAttitude(time, att);
             float tp = (b.pitch + att[0]) * 0.35f, tr = (b.roll + att[1]) * 0.3f;
-            // life size: the driver sits in the boat, so the view moves with the hull
-            if (lifeSize) { tp = b.pitch + att[0] * 0.25f; tr = b.roll + att[1] * 0.25f; }
+            // life size: the driver sits in the boat, so the view moves with the (smoothed) hull
+            if (lifeSize) { tp = b.lpPitch; tr = b.lpRoll; }
             if (!camInit) {
                 fpvPitch = tp; fpvRoll = tr; fpvY = b.y;
                 camInit = true;
@@ -1187,7 +1188,7 @@ final class Game {
                 fpvRoll += (tr - fpvRoll) * k;
                 fpvY += (b.y - fpvY) * Math.min(1f, dt * 4f);
             }
-            if (lifeSize) { fpvPitch = tp; fpvRoll = tr; fpvY = b.y; }
+            if (lifeSize) { fpvPitch = tp; fpvRoll = tr; fpvY = b.lpY; }
             android.opengl.Matrix.setIdentityM(tmpM, 0);
             android.opengl.Matrix.translateM(tmpM, 0, b.x, fpvY, b.z);
             android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(b.heading), 0, 1, 0);
@@ -1196,7 +1197,7 @@ final class Game {
             if (lifeSize) {
                 // the driver's eyes in the cockpit, looking out over the bow
                 transform(tmpM, Boat.LIFE_EYE[0], Boat.LIFE_EYE[1], Boat.LIFE_EYE[2], 1f, out, 0);
-                transform(tmpM, 0f, Boat.LIFE_EYE[1] - 0.55f, -30f, 1f, out, 3);
+                transform(tmpM, 0f, Boat.LIFE_EYE[1] - 0.8f, -30f, 1f, out, 3);
             } else {
                 transform(tmpM, 0f, 0.40f, -0.20f, 1f, out, 0);
                 transform(tmpM, 0f, 0.24f, -6f, 1f, out, 3);

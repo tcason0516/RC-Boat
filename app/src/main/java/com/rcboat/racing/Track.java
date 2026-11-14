@@ -388,8 +388,8 @@ final class Track {
 
     /**
      * Life-size Unlimited hydroplane courses: ovals of 1.5, 2 and 2.5 miles laid out off the
-     * spectator shore and run counter-clockwise (left turns), as Unlimited races are. Big
-     * inflatable turn buoys mark the inside of each turn.
+     * spectator shore and run clockwise (right turns). Big inflatable turn buoys mark the
+     * inside of each turn.
      */
     private void buildLife(int k) {
         float[] miles = {1.5f, 2f, 2.5f};
@@ -421,6 +421,8 @@ final class Track {
             } else { s -= (float) Math.PI * rc; x = -L / 2 + s; z = cz + rc; }
             fx[i] = x; fz[i] = z; fc[i] = total * i / fine;
         }
+        // mirror east-west: the front straight runs west, so every turn is a right turn
+        for (int i = 0; i <= fine; i++) fx[i] = -fx[i];
         resample(fx, fz, fc, fine);
         // five buoys round each turn, every 45 degrees, plus the start / finish buoy
         for (int end = -1; end <= 1; end += 2) {
@@ -432,10 +434,10 @@ final class Track {
             }
         }
         addBuoy(0, cz + R, BUOY_PLAIN, 0);
-        info = String.format(java.util.Locale.US, "%.1f mi, left turns", miles[k]);
-        insideSign = 1f;
-        laneMin = -14f;
-        laneMax = lineOff - 10f;
+        info = String.format(java.util.Locale.US, "%.1f mi, right turns", miles[k]);
+        insideSign = -1f;
+        laneMin = -(lineOff - 10f);
+        laneMax = 14f;
         halfWidth = 30f;
         offCourse = 150f;
         buoyRadius = 1.0f;

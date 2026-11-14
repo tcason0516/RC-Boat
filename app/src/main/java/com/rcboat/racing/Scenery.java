@@ -20,15 +20,19 @@ final class Scenery {
 
     /** Life-size boats: [color] hull and a shared canopy; the cockpit for the driver's view. */
     Mesh[] lifeHulls;
-    Mesh lifeCanopy, cockpit, wheel, unitBox, glove;
+    Mesh lifeCanopy, cockpit, wheel, unitBox, glove, gloveL, gloveR, limb, joint;
     final boolean life;
     /** The driver's eyes in the life-size boat (boat coordinates, forward = -z). */
     static final float[] EYE = Boat.LIFE_EYE;
     /** Steering wheel centre, its tilt back towards the driver (degrees) and rim radius. */
-    static final float[] WHEEL = {0f, 1.17f, -2.46f};
-    static final float WHEEL_TILT = 62f, WHEEL_R = 0.16f;
-    /** Shoulders of the driver (boat coordinates): just below and behind the eyes. */
-    static final float[] SHOULDER_L = {-0.25f, 1.06f, -1.95f}, SHOULDER_R = {0.25f, 1.06f, -1.95f};
+    static final float[] WHEEL = {0f, 1.24f, -2.47f};
+    static final float WHEEL_TILT = 62f, WHEEL_R = 0.165f;
+    /** Rim tube radius (the leather grip). */
+    static final float RIM_T = 0.019f;
+    /** Shoulders of the driver (boat coordinates): below and just behind the eyes. */
+    static final float[] SHOULDER_L = {-0.24f, 1.2f, -1.98f}, SHOULDER_R = {0.24f, 1.2f, -1.98f};
+    /** Where the forearm meets the glove, in the glove's own frame. */
+    static final float[] WRIST = {0.05f, 0f, 0.1f};
 
     Scenery(Game game) { this(game, false); }
 
@@ -169,9 +173,15 @@ final class Scenery {
         cockpit = buildCockpit();
         wheel = buildWheel();
         unitBox = buildSegment2();
-        MeshBuilder gb = new MeshBuilder();
-        gb.sphere(0, 0, 0, 1f, 1f, 1f, 10, 6, 0.08f, 0.08f, 0.09f);
-        glove = gb.build();
+        gloveL = buildGlove(-1);
+        gloveR = buildGlove(1);
+        glove = gloveR;
+        MeshBuilder lb = new MeshBuilder();
+        lb.cylinder(0, -0.5f, 0, 0.5f, 0.5f, 1f, 16, 1f, 1f, 1f, true);   // tinted when drawn
+        limb = lb.build();
+        MeshBuilder jb = new MeshBuilder();
+        jb.sphere(0, 0, 0, 1f, 1f, 1f, 14, 8, 1f, 1f, 1f);
+        joint = jb.build();
     }
 
     /** Grandstand, judges' tower, pit tents and a crane on the shore by the start line. */
@@ -266,77 +276,225 @@ final class Scenery {
         return mb.build();
     }
 
-    /** The cockpit canopy: dark tinted glass. */
+    /** The cockpit canopy: dark tinted glass (see-through from inside). */
     private static Mesh buildLifeCanopy() {
         MeshBuilder mb = new MeshBuilder();
-        mb.sphere(0, 1.2f, -2.25f, 0.55f, 0.42f, 0.95f, 16, 8, 0.05f, 0.08f, 0.11f);
+        mb.sphere(0, 1.26f, -2.25f, 0.56f, 0.47f, 0.98f, 24, 12, 0.05f, 0.08f, 0.11f);
         return mb.build();
+    }
+
+    // ---- small helpers for curved cockpit parts ----
+
+    /** A tube of radius r along a path (closed or open), with smooth normals and end caps. */
+    static void tube(MeshBuilder mb, float[][] path, float r, boolean closed, int sides, float[] col) {
+        int n = path.length;
+        float[][][] ring = new float[n][sides][];
+        float[][][] nrm = new float[n][sides][];
+        float[] ref = {0, 0, 1};
+        for (int i = 0; i < n; i++) {
+            float[] a = path[closed ? (i - 1 + n) % n : Math.max(0, i - 1)];
+            float[] b = path[closed ? (i + 1) % n : Math.min(n - 1, i + 1)];
+            float tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2];
+            float tl = (float) Math.sqrt(tx * tx + ty * ty + tz * tz);
+            tx /= tl; ty /= tl; tz /= tl;
+            if (Math.abs(tx * ref[0] + ty * ref[1] + tz * ref[2]) > 0.9f) ref = new float[]{0, 1, 0};
+            float[] u = norm(cross(new float[]{tx, ty, tz}, ref));
+            float[] v = cross(new float[]{tx, ty, tz}, u);
+            for (int k = 0; k < sides; k++) {
+                double ang = 2 * Math.PI * k / sides;
+                float c = (float) Math.cos(ang), sn = (float) Math.sin(ang);
+                float nx = u[0] * c + v[0] * sn, ny = u[1] * c + v[1] * sn, nz = u[2] * c + v[2] * sn;
+                nrm[i][k] = new float[]{nx, ny, nz};
+                ring[i][k] = new float[]{path[i][0] + nx * r, path[i][1] + ny * r, path[i][2] + nz * r};
+            }
+        }
+        int segs = closed ? n : n - 1;
+        for (int i = 0; i < segs; i++) {
+            int i2 = (i + 1) % n;
+            for (int k = 0; k < sides; k++) {
+                int k2 = (k + 1) % sides;
+                vtx(mb, ring[i][k], nrm[i][k], col); vtx(mb, ring[i2][k], nrm[i2][k], col); vtx(mb, ring[i2][k2], nrm[i2][k2], col);
+                vtx(mb, ring[i][k], nrm[i][k], col); vtx(mb, ring[i2][k2], nrm[i2][k2], col); vtx(mb, ring[i][k2], nrm[i][k2], col);
+            }
+        }
+        if (!closed) {
+            for (int e = 0; e < 2; e++) {
+                int i = e == 0 ? 0 : n - 1;
+                float[] cN = norm(new float[]{path[i][0] - path[e == 0 ? 1 : n - 2][0],
+                        path[i][1] - path[e == 0 ? 1 : n - 2][1], path[i][2] - path[e == 0 ? 1 : n - 2][2]});
+                for (int k = 0; k < sides; k++) {
+                    vtx(mb, path[i], cN, col); vtx(mb, ring[i][k], cN, col); vtx(mb, ring[i][(k + 1) % sides], cN, col);
+                }
+            }
+        }
+    }
+
+    private static void vtx(MeshBuilder mb, float[] p, float[] n, float[] c) {
+        mb.vertex(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2]);
+    }
+
+    private static float[] cross(float[] a, float[] b) {
+        return new float[]{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    }
+
+    private static float[] norm(float[] a) {
+        float l = (float) Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        return new float[]{a[0] / l, a[1] / l, a[2] / l};
+    }
+
+    /** A flat disc facing +z (and -z) at (cx, cy, cz). */
+    static void disc(MeshBuilder mb, float cx, float cy, float cz, float r, int seg, float[] col) {
+        for (int i = 0; i < seg; i++) {
+            double a0 = 2 * Math.PI * i / seg, a1 = 2 * Math.PI * (i + 1) / seg;
+            float[] c = {cx, cy, cz};
+            float[] p0 = {cx + r * (float) Math.cos(a0), cy + r * (float) Math.sin(a0), cz};
+            float[] p1 = {cx + r * (float) Math.cos(a1), cy + r * (float) Math.sin(a1), cz};
+            float[] nf = {0, 0, 1};
+            vtx(mb, c, nf, col); vtx(mb, p0, nf, col); vtx(mb, p1, nf, col);
+        }
+    }
+
+    /** A circle path of radius r in the x-y plane at depth z, from angle a0 to a1 (degrees). */
+    static float[][] arc(float cx, float cy, float z, float r, float a0, float a1, int n) {
+        float[][] p = new float[n][];
+        for (int i = 0; i < n; i++) {
+            double a = Math.toRadians(a0 + (a1 - a0) * i / (n - 1));
+            p[i] = new float[]{cx + r * (float) Math.cos(a), cy + r * (float) Math.sin(a), z};
+        }
+        return p;
     }
 
     /**
      * What the driver sees of the cockpit (drawn instead of the canopy in the cockpit view):
-     * the dash with gauges, the canopy frame, the cockpit sides and the seat.
+     * a carbon-fibre dash with a digital display, round gauges with bezels and needles, a row
+     * of switches, padded cockpit sides, and the canopy's frame.
      */
     private static Mesh buildCockpit() {
         MeshBuilder mb = new MeshBuilder();
-        float[] dk = {0.08f, 0.085f, 0.095f};
-        // dash
-        mb.box(0, 1.08f, -2.75f, 0.95f, 0.2f, 0.18f, 0, dk[0], dk[1], dk[2]);
+        float[] carbon = {0.075f, 0.078f, 0.085f}, pad = {0.13f, 0.13f, 0.14f};
+        float[] chrome = {0.6f, 0.62f, 0.66f}, face = {0.92f, 0.92f, 0.9f}, black = {0.03f, 0.03f, 0.035f};
+        // dash: a curved carbon panel across the cockpit
+        float dz = -2.72f;
+        mb.box(0, 1.1f, dz - 0.06f, 0.98f, 0.22f, 0.16f, 0, carbon[0], carbon[1], carbon[2]);
+        mb.box(0, 1.22f, dz - 0.02f, 1.0f, 0.03f, 0.24f, 0, carbon[0] * 1.3f, carbon[1] * 1.3f, carbon[2] * 1.3f);
+        // digital display in the middle (behind the wheel hub)
+        mb.box(0, 1.13f, dz + 0.021f, 0.24f, 0.09f, 0.004f, 0, 0.02f, 0.05f, 0.06f);
+        mb.box(-0.04f, 1.14f, dz + 0.024f, 0.09f, 0.04f, 0.002f, 0, 0.1f, 0.75f, 0.85f);
+        mb.box(0.06f, 1.14f, dz + 0.024f, 0.06f, 0.04f, 0.002f, 0, 0.95f, 0.55f, 0.1f);
+        // round gauges either side
         for (int i = -2; i <= 2; i++) {
             if (i == 0) continue;
-            mb.sphere(i * 0.18f, 1.12f, -2.655f, 0.042f, 0.042f, 0.006f, 16, 3, 0.9f, 0.9f, 0.88f);
-            mb.sphere(i * 0.18f, 1.12f, -2.65f, 0.03f, 0.03f, 0.004f, 16, 3, 0.05f, 0.05f, 0.05f);
+            float gx = i * 0.2f, gy = 1.115f, gz = dz + 0.022f;
+            disc(mb, gx, gy, gz, 0.045f, 24, face);
+            tube(mb, arc(gx, gy, gz + 0.004f, 0.047f, 0, 360, 25), 0.006f, true, 6, chrome);
+            float na = (float) Math.toRadians(150 - 40 * i);
+            mb.box(gx + 0.018f * (float) Math.cos(na), gy + 0.018f * (float) Math.sin(na), gz + 0.003f,
+                    0.006f, 0.006f, 0.002f, 0, 0.85f, 0.1f, 0.05f);
+            tube(mb, new float[][]{{gx, gy, gz + 0.004f}, {gx + 0.036f * (float) Math.cos(na), gy + 0.036f * (float) Math.sin(na), gz + 0.004f}},
+                    0.0022f, false, 4, new float[]{0.85f, 0.1f, 0.05f});
+            disc(mb, gx, gy, gz + 0.006f, 0.006f, 10, black);
         }
-        // cockpit tub floor, sides and seat
+        // switch row along the top of the dash
+        for (int i = 0; i < 6; i++) {
+            float sx = -0.25f + i * 0.1f;
+            mb.box(sx, 1.205f, dz + 0.04f, 0.022f, 0.012f, 0.022f, 0, 0.2f, 0.2f, 0.22f);
+            tube(mb, new float[][]{{sx, 1.21f, dz + 0.045f}, {sx, 1.225f, dz + 0.075f}}, 0.004f, false, 6, chrome);
+            float[] cap = i == 0 ? new float[]{0.85f, 0.1f, 0.08f} : black;
+            mb.sphere(sx, 1.225f, dz + 0.077f, 0.006f, 0.006f, 0.006f, 8, 4, cap[0], cap[1], cap[2]);
+        }
+        // cockpit tub floor and padded sides
         mb.box(0, 1.075f, -2.2f, 0.9f, 0.02f, 1.2f, 0, 0.14f, 0.14f, 0.15f);
         for (int s = -1; s <= 1; s += 2) {
-            mb.box(s * 0.5f, 1.08f, -2.1f, 0.06f, 0.16f, 1.3f, 0, dk[0], dk[1], dk[2]);
+            mb.box(s * 0.5f, 1.09f, -2.1f, 0.06f, 0.18f, 1.3f, 0, carbon[0], carbon[1], carbon[2]);
+            mb.sphere(s * 0.44f, 1.17f, -2.05f, 0.05f, 0.06f, 0.5f, 12, 6, pad[0], pad[1], pad[2]);
             mb.box(s * 0.33f, 1.1f, -1.55f, 0.12f, 0.5f, 0.5f, 0, 0.15f, 0.15f, 0.17f);
         }
-        // canopy frame: arches over the driver and the windscreen frame
-        float[] fr = {0.12f, 0.12f, 0.13f};
-        for (float z : new float[]{-2.95f, -1.75f}) {
-            for (int i = 0; i < 10; i++) {
-                double a0 = Math.PI * i / 10, a1 = Math.PI * (i + 1) / 10;
-                float x0 = 0.53f * (float) Math.cos(a0), y0 = 1.12f + 0.42f * (float) Math.sin(a0);
-                float x1 = 0.53f * (float) Math.cos(a1), y1 = 1.12f + 0.42f * (float) Math.sin(a1);
-                float[] p0 = {x0, y0, z}, p1 = {x1, y1, z}, p2 = {x1, y1 - 0.035f, z + 0.03f}, p3 = {x0, y0 - 0.035f, z + 0.03f};
-                mb.quad(p0, p1, p2, p3, new float[]{0, 1.1f, z}, fr);
+        // canopy frame: arches over the driver, A-pillars and the windscreen sill
+        float[] fr = {0.1f, 0.1f, 0.11f};
+        for (float z : new float[]{-1.72f}) {   // the arch behind the driver's head
+            float[][] p = new float[17][];
+            for (int i = 0; i <= 16; i++) {
+                double a = Math.PI * i / 16;
+                p[i] = new float[]{0.54f * (float) Math.cos(a), 1.14f + 0.5f * (float) Math.sin(a), z};
             }
+            tube(mb, p, 0.017f, false, 8, fr);
         }
+        for (int s = -1; s <= 1; s += 2) {
+            tube(mb, new float[][]{{s * 0.5f, 1.2f, -2.78f}, {s * 0.47f, 1.42f, -2.55f}, {s * 0.3f, 1.6f, -2.2f}},
+                    0.014f, false, 8, fr);
+        }
+        tube(mb, new float[][]{{-0.5f, 1.2f, -2.82f}, {0f, 1.235f, -2.86f}, {0.5f, 1.2f, -2.82f}}, 0.014f, false, 8, fr);
         return mb.build();
     }
 
-    /** A racing steering wheel in its own frame: rim in the x-y plane, facing +z. */
+    /**
+     * A racing steering wheel in its own frame (rim in the x-y plane, facing +z): leather
+     * rim with thicker grips and a red top marker, three spokes, a hub with buttons and the
+     * column running back into the dash.
+     */
     private static Mesh buildWheel() {
         MeshBuilder mb = new MeshBuilder();
-        int seg = 20;
-        float r = WHEEL_R;
-        for (int i = 0; i < seg; i++) {
-            double a0 = 2 * Math.PI * i / seg, a1 = 2 * Math.PI * (i + 1) / seg;
-            double am = (a0 + a1) / 2;
-            float len = (float) (2 * r * Math.sin(Math.PI / seg)) + 0.004f;
-            // a short box tangent to the rim (rotY only, so build it from quads instead)
-            float cx = r * (float) Math.cos(am), cy = r * (float) Math.sin(am);
-            float tx = -(float) Math.sin(am), ty = (float) Math.cos(am);
-            float nx = (float) Math.cos(am), ny = (float) Math.sin(am);
-            float t = 0.016f;
-            float[][] c = new float[8][];
-            for (int k = 0; k < 8; k++) {
-                float u = ((k & 1) == 0 ? -0.5f : 0.5f) * len, v = ((k & 2) == 0 ? -1 : 1) * t, w = ((k & 4) == 0 ? -1 : 1) * t;
-                c[k] = new float[]{cx + tx * u + nx * v, cy + ty * u + ny * v, w};
-            }
-            float[] col = (i % 5 == 0) ? new float[]{0.75f, 0.1f, 0.08f} : new float[]{0.06f, 0.06f, 0.07f};
-            float[] ref = {0, 0, 0};
-            mb.quad(c[0], c[1], c[3], c[2], ref, col);
-            mb.quad(c[4], c[5], c[7], c[6], ref, col);
-            mb.quad(c[0], c[1], c[5], c[4], ref, col);
-            mb.quad(c[2], c[3], c[7], c[6], ref, col);
+        float r = WHEEL_R, t = RIM_T;
+        float[] leather = {0.05f, 0.05f, 0.055f}, grip = {0.08f, 0.08f, 0.085f};
+        float[] metal = {0.42f, 0.43f, 0.46f}, red = {0.8f, 0.08f, 0.06f};
+        tube(mb, arc(0, 0, 0, r, 0, 360, 49), t, true, 10, leather);
+        // thicker grips where the hands go, and the red top-centre marker
+        tube(mb, arc(0, 0, 0, r, 140, 185, 10), t * 1.18f, false, 10, grip);
+        tube(mb, arc(0, 0, 0, r, -5, 40, 10), t * 1.18f, false, 10, grip);
+        tube(mb, arc(0, 0, 0, r, 86, 94, 4), t * 1.08f, false, 10, red);
+        // spokes: left, right and bottom
+        for (float a : new float[]{0f, 180f, 270f}) {
+            double ar = Math.toRadians(a);
+            float ex = (r - t) * (float) Math.cos(ar), ey = (r - t) * (float) Math.sin(ar);
+            tube(mb, new float[][]{{0.05f * (float) Math.cos(ar), 0.05f * (float) Math.sin(ar), -0.012f},
+                    {ex, ey, -0.004f}}, 0.011f, false, 8, metal);
         }
-        // three spokes and the hub
-        mb.box(0, 0, -0.01f, 0.32f, 0.03f, 0.015f, 0, 0.35f, 0.35f, 0.37f);
-        mb.box(0, -0.085f, -0.01f, 0.03f, 0.17f, 0.015f, 0, 0.35f, 0.35f, 0.37f);
-        mb.sphere(0, 0, 0, 0.045f, 0.045f, 0.02f, 12, 4, 0.2f, 0.2f, 0.22f);
+        // hub, its bezel and buttons
+        disc(mb, 0, 0, 0.004f, 0.058f, 28, new float[]{0.06f, 0.06f, 0.065f});
+        tube(mb, arc(0, 0, 0.002f, 0.058f, 0, 360, 29), 0.006f, true, 6, metal);
+        float[][] btn = {{0.8f, 0.1f, 0.08f}, {0.95f, 0.75f, 0.1f}, {0.15f, 0.35f, 0.9f}, {0.1f, 0.7f, 0.25f}};
+        for (int i = 0; i < 4; i++) {
+            double a = Math.toRadians(45 + 90 * i);
+            disc(mb, 0.033f * (float) Math.cos(a), 0.033f * (float) Math.sin(a), 0.009f, 0.009f, 12, btn[i]);
+        }
+        // steering column into the dash
+        tube(mb, new float[][]{{0, 0, -0.01f}, {0, 0, -0.32f}}, 0.024f, false, 12, metal);
+        return mb.build();
+    }
+
+    /**
+     * A racing glove gripping the rim, in the hand's frame: x points out from the wheel
+     * centre, y along the rim (side = which way the thumb points), z towards the driver.
+     * The palm sits on the driver's side, the fingers wrap round the back of the rim.
+     */
+    private static Mesh buildGlove(int side) {
+        MeshBuilder mb = new MeshBuilder();
+        float[] glove = {0.07f, 0.07f, 0.075f}, palm = {0.18f, 0.18f, 0.19f}, accent = {0.75f, 0.08f, 0.06f};
+        float t = RIM_T * 1.18f;
+        // back of the hand and palm wrapped over the front of the rim
+        mb.sphere(0.018f, 0f, t + 0.012f, 0.04f, 0.046f, 0.022f, 16, 8, glove[0], glove[1], glove[2]);
+        mb.sphere(0.03f, 0f, 0.03f, 0.032f, 0.04f, 0.02f, 12, 6, palm[0], palm[1], palm[2]);
+        // four fingers curling round the rim from the outside to the back
+        float[] fy = {-0.03f, -0.01f, 0.01f, 0.029f};
+        float[] len = {0.85f, 1f, 0.97f, 0.8f};
+        for (int f = 0; f < 4; f++) {
+            float rr = t + 0.008f;
+            int n = 9;
+            float[][] p = new float[n][];
+            for (int i = 0; i < n; i++) {
+                double a = Math.toRadians(70 - (200 * len[f]) * i / (n - 1));
+                p[i] = new float[]{rr * (float) Math.cos(a), fy[f] * side, rr * (float) Math.sin(a)};
+            }
+            tube(mb, p, 0.0085f, false, 8, glove);
+        }
+        // knuckle ridge and a red logo panel on the back of the hand
+        tube(mb, new float[][]{{0.03f, -0.035f * side, 0.022f}, {0.032f, 0.034f * side, 0.022f}}, 0.008f, false, 8, glove);
+        mb.box(0.02f, 0f, t + 0.033f, 0.03f, 0.03f, 0.003f, 0, accent[0], accent[1], accent[2]);
+        // thumb over the front of the rim, pointing to twelve o'clock
+        tube(mb, new float[][]{{0.01f, 0.03f * side, 0.03f}, {-0.012f, 0.05f * side, t + 0.01f},
+                {-0.028f, 0.062f * side, t * 0.6f}}, 0.0095f, false, 8, glove);
+        // gauntlet cuff up to the wrist
+        tube(mb, new float[][]{{0.03f, 0f, 0.045f}, {WRIST[0], WRIST[1], WRIST[2]}}, 0.033f, false, 14, glove);
         return mb.build();
     }
 

@@ -700,7 +700,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             cockpitView = lifeNow && game.state != Game.State.MENU && game.view == Game.VIEW_FPV && playerIdx >= 0;
             if (playerIdx >= 0) {
                 // the wheel follows the player's steering, smoothed like real hands
-                float target = -game.boats[playerIdx].steer * 100f;
+                float target = -game.boats[playerIdx].steer * 60f;   // +-60 degrees of lock
                 wheelAngle += (target - wheelAngle) * Math.min(1f, dt * 8f);
             }
             islandOn = game.islandVisible();
@@ -789,6 +789,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         drawFlat(partBuf, partVerts, 0.94f, 0.97f, 1.0f, 1f);
         fillSpray();
         drawFlat(sprayBuf, sprayVerts, 0.93f, 0.96f, 1.0f, 0.55f);
+        drawCanopyGlass();
         GLES20.glDepthMask(true);
         GLES20.glDisable(GLES20.GL_BLEND);
     }
@@ -1112,11 +1113,12 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     /**
      * Life-size cockpit view: dash, canopy frame and seat, the steering wheel turning with
-     * the player's steering, and the driver's arms reaching to gloved hands on the rim.
+     * the player's steering, and the driver's arms (fire-suit sleeves with white cuffs) to
+     * gloved hands gripping the rim at "ten to two".
      */
     private void drawCockpit(int i) {
         float[] bm = boatM[i];
-        material(0.25f, 20f, false);
+        material(0.35f, 30f, false);
         System.arraycopy(bm, 0, model, 0, 16);
         drawLit(lifeScene.cockpit);
         // the wheel: at its hub, tilted back towards the driver, turned by the steering
@@ -1126,34 +1128,88 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         Matrix.rotateM(tmpA, 0, -(90f - Scenery.WHEEL_TILT), 1, 0, 0);
         Matrix.rotateM(tmpA, 0, wheelAngle, 0, 0, 1);
         Matrix.multiplyMM(model, 0, bm, 0, tmpA, 0);
-        material(0.4f, 40f, false);
+        material(0.5f, 50f, false);
         drawLit(lifeScene.wheel);
-        // hands at "ten to two" on the rim, turning with it
-        material(0.15f, 10f, false);
+        float[] suit = Game.COLORS[boatColor[i]];
+        float sr = suit[0] * 0.8f, sg = suit[1] * 0.8f, sb = suit[2] * 0.8f;
         for (int s = -1; s <= 1; s += 2) {
-            double a = Math.toRadians(s < 0 ? 160 : 20);
-            hand[0] = Scenery.WHEEL_R * (float) Math.cos(a);
-            hand[1] = Scenery.WHEEL_R * (float) Math.sin(a);
-            hand[2] = 0.02f;
-            hand[3] = 1f;
-            Matrix.multiplyMV(handW, 0, tmpA, 0, hand, 0);   // boat coordinates
-            float[] sh = s < 0 ? Scenery.SHOULDER_L : Scenery.SHOULDER_R;
-            // elbow: between shoulder and hand, dropped and pushed outwards
-            float ex = (sh[0] + handW[0]) * 0.5f + s * 0.1f;
-            float ey = (sh[1] + handW[1]) * 0.5f - 0.1f;
-            float ez = (sh[2] + handW[2]) * 0.5f + 0.02f;
-            limb(bm, sh[0], sh[1], sh[2], ex, ey, ez, 0.075f);
-            limb(bm, ex, ey, ez, handW[0], handW[1], handW[2], 0.06f);
+            // the hand's frame: rotate round the wheel to the grip, out to the rim
             Matrix.setIdentityM(tmpB, 0);
-            Matrix.translateM(tmpB, 0, handW[0], handW[1], handW[2]);
-            Matrix.scaleM(tmpB, 0, 0.045f, 0.04f, 0.055f);
-            Matrix.multiplyMM(model, 0, bm, 0, tmpB, 0);
-            drawLit(lifeScene.glove);
+            Matrix.rotateM(tmpB, 0, s < 0 ? 160f : 20f, 0, 0, 1);
+            Matrix.translateM(tmpB, 0, Scenery.WHEEL_R, 0, 0);
+            Matrix.multiplyMM(handM, 0, tmpA, 0, tmpB, 0);       // boat coordinates
+            Matrix.multiplyMM(model, 0, bm, 0, handM, 0);
+            material(0.25f, 18f, false);
+            drawLit(s < 0 ? lifeScene.gloveL : lifeScene.gloveR);
+            hand[0] = Scenery.WRIST[0]; hand[1] = Scenery.WRIST[1]; hand[2] = Scenery.WRIST[2]; hand[3] = 1f;
+            Matrix.multiplyMV(handW, 0, handM, 0, hand, 0);
+            float[] sh = s < 0 ? Scenery.SHOULDER_L : Scenery.SHOULDER_R;
+            // elbow: between shoulder and wrist, dropped and pushed outwards
+            float ex = (sh[0] + handW[0]) * 0.5f + s * 0.11f;
+            float ey = (sh[1] + handW[1]) * 0.5f - 0.11f;
+            float ez = (sh[2] + handW[2]) * 0.5f + 0.03f;
+            material(0.12f, 10f, false);
+            limb(bm, sh[0], sh[1], sh[2], ex, ey, ez, 0.095f, sr, sg, sb);
+            limb(bm, ex, ey, ez, handW[0], handW[1], handW[2], 0.076f, sr, sg, sb);
+            sphereAt(bm, ex, ey, ez, 0.046f, sr, sg, sb);
+            // white suit cuff just short of the glove
+            float cx = ex + (handW[0] - ex) * 0.86f, cy = ey + (handW[1] - ey) * 0.86f, cz = ez + (handW[2] - ez) * 0.86f;
+            limb(bm, cx, cy, cz, ex + (handW[0] - ex) * 0.95f, ey + (handW[1] - ey) * 0.95f,
+                    ez + (handW[2] - ez) * 0.95f, 0.082f, 0.92f, 0.92f, 0.92f);
         }
     }
 
+    private final float[] handM = new float[16];
+
+    /** A tinted sphere (joint) of radius r at a point in boat coordinates. */
+    private void sphereAt(float[] bm, float x, float y, float z, float r, float cr, float cg, float cb) {
+        Matrix.setIdentityM(tmpB, 0);
+        Matrix.translateM(tmpB, 0, x, y, z);
+        Matrix.scaleM(tmpB, 0, r, r, r);
+        Matrix.multiplyMM(model, 0, bm, 0, tmpB, 0);
+        drawLitTint(lifeScene.joint, cr, cg, cb);
+    }
+
+    private void drawLitTint(Mesh m, float r, float g, float b) {
+        Matrix.multiplyMM(mvp, 0, curVP, 0, model, 0);
+        GLES20.glUniformMatrix4fv(uMVP, 1, false, mvp, 0);
+        GLES20.glUniformMatrix4fv(uModel, 1, false, model, 0);
+        GLES20.glUniform3f(uTint, r, g, b);
+        m.draw(lPos, lNormal, lColor);
+        GLES20.glDisableVertexAttribArray(lPos);
+        GLES20.glDisableVertexAttribArray(lNormal);
+        GLES20.glDisableVertexAttribArray(lColor);
+        GLES20.glUniform3f(uTint, 1f, 1f, 1f);
+    }
+
+    /**
+     * The canopy seen from inside: faintly tinted glass with the sun's glints, drawn over
+     * everything else so the water outside shows through it too.
+     */
+    private void drawCanopyGlass() {
+        if (!cockpitView || lifeScene == null || playerIdx < 0) return;
+        GLES20.glUseProgram(litProg);
+        GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
+        GLES20.glUniform3f(uCam, cam[0], cam[1], cam[2]);
+        GLES20.glUniform3f(uFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
+        GLES20.glUniform1f(uFogDensity, fogDensity());
+        GLES20.glUniform1f(uClip, 0f);
+        GLES20.glUniform1f(uShadowOn, 0f);
+        GLES20.glUniform1f(uSway, 0f);
+        material(1.4f, 160f, false);
+        GLES20.glEnable(GLES20.GL_BLEND);
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+        GLES20.glDepthMask(false);
+        GLES20.glUniform1f(uAlpha, 0.16f);
+        curVP = vp;
+        System.arraycopy(boatM[playerIdx], 0, model, 0, 16);
+        drawLit(lifeScene.lifeCanopy);
+        GLES20.glUniform1f(uAlpha, 1f);
+    }
+
     /** A box of square cross-section th from point a to point b (boat coordinates). */
-    private void limb(float[] bm, float ax, float ay, float az, float bx, float by, float bz, float th) {
+    private void limb(float[] bm, float ax, float ay, float az, float bx, float by, float bz, float th,
+                      float cr, float cg, float cb) {
         float dx = bx - ax, dy = by - ay, dz = bz - az;
         float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
         float ux = dx / len, uy = dy / len, uz = dz / len;
@@ -1169,7 +1225,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         m[8] = qx * th; m[9] = qy * th; m[10] = qz * th; m[11] = 0;
         m[12] = (ax + bx) / 2; m[13] = (ay + by) / 2; m[14] = (az + bz) / 2; m[15] = 1;
         Matrix.multiplyMM(model, 0, bm, 0, m, 0);
-        drawLit(lifeScene.unitBox);
+        drawLitTint(lifeScene.limb, cr, cg, cb);
     }
 
     /** Soft dark ellipses under the boats and buoys, nudged away from the sun. */

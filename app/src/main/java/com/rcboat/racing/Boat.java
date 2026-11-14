@@ -17,7 +17,7 @@ final class Boat {
             "Grippy, sharp turns", "Tunnel hull: fast, stable, wide turns",
             "Life-size turbine Unlimited hydroplane"};
     /** The driver's eyes in the life-size boat (boat coordinates, forward = -z). */
-    static final float[] LIFE_EYE = {0f, 1.36f, -2.0f};
+    static final float[] LIFE_EYE = {0f, 1.5f, -2.0f};
     /** RC hulls the menus offer (the Unlimited is life-size only). */
     static final int RC_HULLS = 4;
     private static final float[][] HULL_STATS = {
@@ -109,6 +109,9 @@ final class Boat {
     float waterDrag = 0.12f;
     /** How much the nose lifts with speed. */
     float pitchK = 1f;
+    /** Life size: attitude and height with the small-wave chatter filtered out. */
+    float lpPitch, lpRoll, lpY;
+    private boolean lpInit;
     Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
         this.hull = hull;
@@ -281,13 +284,28 @@ final class Boat {
         float p = pitch + att[0];
         float rl = roll + att[1];
         if (hull == HYDROPLANE) p += 0.02f * clamp(forwardSpeed() / topSpeed, 0f, 1f);
-        if (hull == UNLIMITED) { p = pitch + att[0] * 0.25f; rl = roll + att[1] * 0.25f; }   // heavy: rides over the chop
+        if (hull == UNLIMITED) { p = lpPitch; rl = lpRoll; }   // heavy: rides over the chop
+        float yy = hull == UNLIMITED ? lpY : y;
         android.opengl.Matrix.setIdentityM(m, 0);
-        android.opengl.Matrix.translateM(m, 0, x, y, z);
+        android.opengl.Matrix.translateM(m, 0, x, yy, z);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(heading), 0, 1, 0);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(p), 1, 0, 0);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(rl), 0, 0, 1);
         if (sizeScale != 1f) android.opengl.Matrix.scaleM(m, 0, sizeScale, sizeScale, sizeScale);
+    }
+
+    /**
+     * Life size: low-pass the attitude. A 6-ton hull at 170 mph skims over the lake's small
+     * waves, so only slow changes (throttle, banking into turns) reach the hull and driver.
+     */
+    void smoothAttitude(float time, float dt) {
+        waveAttitude(time, att);
+        float tp = pitch + att[0] * 0.1f, tr = roll + att[1] * 0.1f, ty = y * 0.3f;
+        if (!lpInit) { lpPitch = tp; lpRoll = tr; lpY = ty; lpInit = true; return; }
+        float k = Math.min(1f, dt / 0.6f), ky = Math.min(1f, dt / 0.5f);
+        lpPitch += (tp - lpPitch) * k;
+        lpRoll += (tr - lpRoll) * k;
+        lpY += (ty - lpY) * ky;
     }
 
     static float wrapAngle(float a) {

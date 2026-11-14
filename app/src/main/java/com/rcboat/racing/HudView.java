@@ -103,40 +103,45 @@ final class HudView extends View {
         float px = (w - pw) / 2f, py = (h - ph) / 2f;
         panel(c, px, py, pw, ph);
 
-        textC(c, "RC BOAT RACING", w / 2f, py + 10 * u, 8.5f * u, Color.WHITE);
+        textC(c, "RC BOAT RACING", w / 2f, py + 9 * u, 7 * u, Color.WHITE);
         final Game g = game;
         Track tr = g.track;
         String line1 = tr.name + (tr.impba ? " (" + tr.info + ")" : "") + "  \u2022  "
                 + Boat.HULL_NAMES[g.hull] + ": " + Boat.HULL_INFO[g.hull];
         String line2 = Game.POWER_INFO[g.power] + "  \u2022  " + Game.RULE_INFO[g.rules];
-        textC(c, line1, w / 2f, py + 15.5f * u, 3.4f * u, 0xFF9FD8FF);
-        textC(c, line2, w / 2f, py + 19.5f * u, 3.4f * u, 0xFF9FD8FF);
+        textC(c, line1, w / 2f, py + 14.5f * u, 3.2f * u, 0xFF9FD8FF);
+        textC(c, line2, w / 2f, py + 18.5f * u, 3.2f * u, 0xFF9FD8FF);
 
-        float colW = (pw - 6 * u) / 2f;
-        float rowH = 9.4f * u;
-        float x0 = px + 3 * u, x1 = px + 3 * u + colW;
-        float y0 = py + 21.5f * u;
+        // two clearly separated columns of setting cards, each with a heading
+        float gap = 5 * u;
+        float colW = (pw - 6 * u - gap) / 2f;
+        float x0 = px + 3 * u, x1 = x0 + colW + gap;
+        float rowH = 8.9f * u;
+        float y0 = py + 27 * u;
+        heading(c, x0, py + 24.2f * u, colW, "RACE");
+        heading(c, x1, py + 24.2f * u, colW, "BOAT & OPTIONS");
 
         int nP = Game.POWER_NAMES.length;
         row(c, x0, y0, colW, rowH, "Track", shortTrack(tr),
                 () -> g.setTrack(g.trackId - 1), () -> g.setTrack(g.trackId + 1));
-        row(c, x0, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
-                () -> g.hull = (g.hull + 2) % 3, () -> g.hull = (g.hull + 1) % 3);
-        row(c, x0, y0 + 2 * rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
-                () -> g.power = (g.power + nP - 1) % nP, () -> g.power = (g.power + 1) % nP);
-        row(c, x0, y0 + 3 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
-                () -> g.opponents = Math.max(0, g.opponents - 1),
-                () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
-        row(c, x0, y0 + 4 * rowH, colW, rowH, "Laps", String.valueOf(g.laps),
+        row(c, x0, y0 + rowH, colW, rowH, "Laps", String.valueOf(g.laps),
                 () -> g.laps = Math.max(1, g.laps - 1),
                 () -> g.laps = Math.min(9, g.laps + 1));
-        row(c, x0, y0 + 5 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
+                () -> g.opponents = Math.max(0, g.opponents - 1),
+                () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
                 () -> g.difficulty = Math.max(0, g.difficulty - 1),
                 () -> g.difficulty = Math.min(2, g.difficulty + 1));
-        row(c, x1, y0, colW, rowH, "Start", Game.START_NAMES[g.startMode],
+        row(c, x0, y0 + 4 * rowH, colW, rowH, "Start", Game.START_NAMES[g.startMode],
                 () -> g.startMode = (g.startMode + 2) % 3, () -> g.startMode = (g.startMode + 1) % 3);
-        row(c, x1, y0 + rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
+        row(c, x0, y0 + 5 * rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
                 () -> g.rules = (g.rules + 2) % 3, () -> g.rules = (g.rules + 1) % 3);
+
+        row(c, x1, y0, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
+                () -> g.hull = (g.hull + 2) % 3, () -> g.hull = (g.hull + 1) % 3);
+        row(c, x1, y0 + rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
+                () -> g.power = (g.power + nP - 1) % nP, () -> g.power = (g.power + 1) % nP);
         row(c, x1, y0 + 2 * rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
                 () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
         row(c, x1, y0 + 3 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
@@ -146,9 +151,22 @@ final class HudView extends View {
         row(c, x1, y0 + 5 * rowH, colW, rowH, "Announcer", g.announcerOn ? "On" : "Off",
                 () -> g.announcerOn = !g.announcerOn, () -> g.announcerOn = !g.announcerOn);
 
-        float bw = 56 * u, bh = 11 * u;
-        button(c, (w - bw) / 2f, py + ph - bh - 3 * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.5f * u,
+        float bw = 56 * u, bh = 10 * u;
+        button(c, (w - bw) / 2f, py + ph - bh - 2.5f * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.2f * u,
                 game::startRace);
+    }
+
+    /** Column heading: small spaced capitals over a thin rule. */
+    private void heading(Canvas c, float x, float y, float cw, String title) {
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(2.9f * u);
+        text.setColor(0xFF7FB6DA);
+        text.setLetterSpacing(0.15f);
+        c.drawText(title, x + 1.5f * u, y, text);
+        text.setLetterSpacing(0f);
+        stroke.setColor(0x447FB6DA);
+        stroke.setStrokeWidth(0.25f * u);
+        c.drawLine(x, y + 1.2f * u, x + cw, y + 1.2f * u, stroke);
     }
 
     /** Track name short enough for the menu's value box. */
@@ -157,23 +175,42 @@ final class HudView extends View {
                 .replace(" mi mi", " mi") : t.name;
     }
 
+    /**
+     * One setting as a card: the name on the left, and its value in a dark box between
+     * the arrows on the right, so each value sits clearly with its own label.
+     */
     private void row(Canvas c, float x, float y, float cw, float rh, String label, String value,
                      Action dec, Action inc) {
-        float pad = 3 * u;
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(4.0f * u);
-        text.setColor(0xFFDDE8F0);
-        c.drawText(label, x + pad, y + rh * 0.6f, text);
+        float ch = rh - 1.4f * u;               // card height; the rest is the gap between cards
+        rect.set(x, y, x + cw, y + ch);
+        fill.setColor(0x26FFFFFF);
+        c.drawRoundRect(rect, 2 * u, 2 * u, fill);
+        float mid = y + ch / 2f;
 
-        float bs = rh * 0.72f;
-        float rightEdge = x + cw - pad;
-        float valueW = Math.min(34 * u, cw * 0.42f);
-        float incX = rightEdge - bs;
-        float decX = incX - valueW - bs;
-        float by = y + (rh - bs) / 2f;
-        button(c, decX, by, bs, bs, "<", 0xFF35506A, 5 * u, dec);
-        button(c, incX, by, bs, bs, ">", 0xFF35506A, 5 * u, inc);
-        textC(c, value, decX + bs + valueW / 2f, y + rh * 0.6f, 4.2f * u, Color.WHITE);
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(3.7f * u);
+        text.setColor(0xFFDDE8F0);
+        Paint.FontMetrics fm = text.getFontMetrics();
+        float base = mid - (fm.ascent + fm.descent) / 2f;
+        c.drawText(label, x + 2.5f * u, base, text);
+
+        float bs = ch - 1.6f * u;              // arrow button size
+        float valueW = Math.min(30 * u, cw * 0.46f);
+        float incX = x + cw - 0.8f * u - bs;
+        float valX = incX - 0.6f * u - valueW;
+        float decX = valX - 0.6f * u - bs;
+        float by = mid - bs / 2f;
+        rect.set(valX, by, valX + valueW, by + bs);
+        fill.setColor(0x66061420);
+        c.drawRoundRect(rect, 1.5f * u, 1.5f * u, fill);
+        button(c, decX, by, bs, bs, "\u2039", 0xFF35506A, 4.6f * u, dec);
+        button(c, incX, by, bs, bs, "\u203A", 0xFF35506A, 4.6f * u, inc);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(3.7f * u);
+        text.setColor(Color.WHITE);
+        c.drawText(value, valX + valueW / 2f, base, text);
+        // tapping the value itself also steps forward
+        buttons.add(new Btn(new RectF(valX, by, valX + valueW, by + bs), inc));
     }
 
     private void drawRace(Canvas c, int w, int h) {

@@ -411,6 +411,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private boolean islandOn;
     private final Mesh[] gates = new Mesh[Track.COUNT];
     private int boatCount;
+    private String clockText = "";
+    private boolean clockColon;
     private final float[] markerPos = new float[3];
     private boolean showMarker;
     private float time;
@@ -690,6 +692,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 markerPos[1] = game.player.y;
                 markerPos[2] = game.player.z;
             }
+            clockText = game.clockDigits();
+            clockColon = clockText.length() == 3 && clockText.charAt(0) != ' ';
             if (wobble.length != game.buoyWobble.length) wobble = new float[game.buoyWobble.length];
             System.arraycopy(game.buoyWobble, 0, wobble, 0, wobble.length);
             fillParticles(game.particles);
@@ -792,7 +796,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             GLES20.glUniform1f(uSway, 0f);
         }
         material(0.35f, 40f, false);
-        drawLit(gates[track.id]);
+        if (!track.impba) drawLit(gates[track.id]);
+        else drawClock();
 
         // RC drivers on the platform
         material(0.15f, 12f, false);
@@ -815,7 +820,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             Matrix.translateM(model, 0, bu[0], wy, bu[1]);
             float tilt = (float) Math.sin(time * 1.3f + i) * 4f + w * 25f * (float) Math.sin(time * 9f + i);
             Matrix.rotateM(model, 0, tilt, (float) Math.cos(i), 0, (float) Math.sin(i));
-            drawLit(bu[2] == 0 ? scene.buoyRed : scene.buoyYellow);
+            int type = (int) bu[2];
+            drawLit(type == Track.BUOY_LEFT ? scene.buoyRed : type == Track.BUOY_RIGHT ? scene.buoyYellow
+                    : type == Track.BUOY_TURN ? scene.buoyTurn : scene.buoyPlain);
         }
 
         // boats: glossy gelcoat
@@ -943,6 +950,51 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         }
         partVerts = v;
         partBuf.position(0);
+    }
+
+    // 7-segment layout: segments a-g as x, y (centre, in digit heights) and horizontal or not
+    private static final float[][] SEG = {
+            {0, 1f, 1}, {0.28f, 0.75f, 0}, {0.28f, 0.25f, 0}, {0, 0, 1}, {-0.28f, 0.25f, 0},
+            {-0.28f, 0.75f, 0}, {0, 0.5f, 1}};
+    private static final int[] DIGIT_SEGS = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+
+    /** The floating start clock in the infield and its digits (IMPBA ovals). */
+    private void drawClock() {
+        Matrix.setIdentityM(model, 0);
+        float wy = World.wave(track.clockX, track.clockZ, time) * 0.5f;
+        Matrix.translateM(model, 0, track.clockX, wy, track.clockZ);
+        drawLit(scene.clockBody);
+        float[] base = new float[16];
+        System.arraycopy(model, 0, base, 0, 16);
+        String txt = clockText;
+        float h = Scenery.DIGIT_H, w = h * 2f / 3f;
+        float y0 = Scenery.CLOCK_Y0 + (Scenery.CLOCK_H - h) / 2f;
+        material(0.2f, 20f, false);
+        for (int d = 0; d < 3; d++) {
+            char ch = d < txt.length() ? txt.charAt(d) : ' ';
+            if (ch < '0' || ch > '9') continue;
+            int bits = DIGIT_SEGS[ch - '0'];
+            float cx = (d - 1) * (w + 0.12f) + (d == 0 ? -0.08f : 0f);
+            for (int sgi = 0; sgi < 7; sgi++) {
+                if ((bits & (1 << sgi)) == 0) continue;
+                float[] sg = SEG[sgi];
+                System.arraycopy(base, 0, model, 0, 16);
+                Matrix.translateM(model, 0, cx + sg[0] * w * 1.4f, y0 + sg[1] * h, 0.08f);
+                if (sg[2] > 0) Matrix.scaleM(model, 0, w * 0.62f, h * 0.09f, 0.02f);
+                else Matrix.scaleM(model, 0, w * 0.13f, h * 0.42f, 0.02f);
+                drawLit(scene.segment);
+            }
+        }
+        if (clockColon) {
+            for (int k = 0; k < 2; k++) {
+                System.arraycopy(base, 0, model, 0, 16);
+                Matrix.translateM(model, 0, -(w + 0.12f) / 2f - 0.04f, y0 + h * (0.3f + 0.4f * k), 0.08f);
+                Matrix.scaleM(model, 0, 0.06f, 0.06f, 0.02f);
+                drawLit(scene.segment);
+            }
+        }
+        Matrix.setIdentityM(model, 0);
+        material(0.35f, 40f, false);
     }
 
     /** Soft dark ellipses under the boats and buoys, nudged away from the sun. */

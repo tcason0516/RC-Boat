@@ -29,6 +29,37 @@ final class Game {
             "Purple Haze", "Orange Crush"};
     static final String[] DIFFICULTY = {"Easy", "Normal", "Hard"};
 
+    // ---- power: electric, or one of the IMPBA Large Scale Gas engine classes (rule book I-IV) ----
+    static final int ELECTRIC = 0, GAS_TWIN = 4;
+    static final String[] POWER_NAMES = {"Electric", "Gas 25.5cc", "Gas 27cc", "Gas 36cc", "Gas Twin 64"};
+    static final String[] POWER_INFO = {
+            "Electric: instant throttle, quiet whine",
+            "Gas Super Sport: spec Zenoah G260, 25.5 cc",
+            "Gas LSG27: up to 27 cc",
+            "Gas LSG36: up to 36 cc",
+            "Gas TLSG64: twin cylinders, up to 64 cc"};
+    /** Top speed and acceleration multipliers, throttle response time (s). */
+    private static final float[][] POWER_STATS = {
+            {1.08f, 1.30f, 0.05f},
+            {1.00f, 0.92f, 0.24f},
+            {1.05f, 0.97f, 0.24f},
+            {1.12f, 1.03f, 0.26f},
+            {1.20f, 1.10f, 0.28f},
+    };
+
+    // ---- start: standing start from the line, or the IMPBA clock start (Technical Standards VII) ----
+    static final int START_STANDING = 0, START_CLOCK_SHORT = 1, START_CLOCK_FULL = 2;
+    static final String[] START_NAMES = {"Standing", "Clock, short", "Clock, full"};
+    /** No crossing the start line in the last 5 s (the clock face's coloured pie section). */
+    static final float JUMP_WINDOW = 5f;
+
+    // ---- buoy rules ----
+    static final int RULES_FUN = 0, RULES_TIME = 1, RULES_LAP = 2;
+    static final String[] RULE_NAMES = {"Just for fun", "Time penalty", "Lap penalty"};
+    static final String[] RULE_INFO = {"No penalties", "+3 s per buoy hit or cut, or jump start",
+            "+1 lap per buoy hit or cut, or jump start"};
+    static final float PENALTY_SECONDS = 3f;
+
     // ---- settings (changed from the menu) ----
     int opponents = 5;
     int laps = 3;
@@ -39,6 +70,9 @@ final class Game {
     boolean dualStick = true;
     boolean soundOn = true;
     boolean announcerOn = true;
+    int power = ELECTRIC;
+    int startMode = START_STANDING;
+    int rules = RULES_FUN;
 
     // ---- race announcers (voice only) ----
     final Announcer announcer = new Announcer();
@@ -60,6 +94,8 @@ final class Game {
     Boat player;
     float time;          // free-running clock (waves, bobbing)
     float countdown;
+    boolean clockStart;  // this race uses the clock start (boats run before zero)
+    private float clockCallAt;
     float raceTime;
     float finishedFor;   // seconds since the player finished
     String message = "";
@@ -128,12 +164,16 @@ final class Game {
             // in a race every boat uses the hull the player picked; the menu demo shows a mix
             int h = withPlayer ? hull : rnd.nextInt(Boat.HULL_NAMES.length);
             Boat b = new Boat(i, NAMES[i], COLORS[i], isPlayer, h, rnd);
+            // in a race everyone runs the player's power class; the demo mixes them
+            int pw = withPlayer ? power : rnd.nextInt(POWER_STATS.length);
+            b.setPower(POWER_STATS[pw][0], POWER_STATS[pw][1], POWER_STATS[pw][2]);
             if (!isPlayer) {
                 b.autopilot = true;
                 b.skill = withPlayer ? skillRange[difficulty] + rnd.nextFloat() * 0.06f
                         : 0.9f + rnd.nextFloat() * 0.08f;
                 b.maxSpeed = b.topSpeed * b.skill;
                 b.lane = b.laneTarget = 0;
+                b.startDelay = 0.25f + (1f - b.skill) * 3.5f + rnd.nextFloat() * 0.4f;
             }
             boats[i] = b;
         }
@@ -186,10 +226,20 @@ final class Game {
         engineOn = false;
     }
 
+    /** Clock length: 2.5 min (gas) or 60 s (electric) as in the rules, or a short version. */
+    float clockLength() {
+        boolean gas = power != ELECTRIC;
+        if (startMode == START_CLOCK_FULL) return gas ? 150f : 60f;
+        return gas ? 30f : 15f;
+    }
+
     synchronized void startRace() {
         createBoats(1 + opponents, true);
         state = State.COUNTDOWN;
-        countdown = 4.8f;   // a moment for the announcer's opening line before "3, 2, 1"
+        clockStart = startMode != START_STANDING;
+        countdown = clockStart ? clockLength() : 4.8f;   // standing: a moment for the opening line
+        clockCallAt = countdown;
+        if (clockStart) spreadForClock();
         announcer.reset();
         evBuoy = evShore = evBump = false;
         annStartDelay = 0.15f;
@@ -205,6 +255,62 @@ final class Game {
         message = "";
         camInit = false;
         beepRequest = 520;
+    }
+
+    /**
+     * Clock start: boats are launched and spread around the back half of the course,
+     * moving off at their own pace, and must time their run to the start line.
+     */
+    private void spreadForClock() {
+        int n = boats.length;
+        for (int i = 0; i < n; i++) {
+            Boat b = boats[i];
+            float frac = 0.42f + 0.35f * i / Math.max(1, n - 1);
+            int idx = track.wrap(Math.round(frac * Track.N));
+            float lat = track.laneMin + (track.laneMax - track.laneMin) * (i % 2 == 0 ? 0.25f : 0.75f);
+            b.placeAt(track, idx, lat);
+            b.lapWrap = -1;
+            b.progress = -track.length + track.cum[idx];
+            b.lastCrossClock = -1;
+        }
+    }
+
+    /**
+     * The start clock's digits: three characters (minutes, tens, units) with leading
+     * zeros blanked, or "" when the clock is blank (it goes blank at the start).
+     */
+    synchronized String clockDigits() {
+        if (state != State.COUNTDOWN) return "";
+        int secs = (int) Math.ceil(countdown);
+        if (!clockStart && secs > 3) return "";
+        if (secs >= 60) return (secs / 60) + String.format(java.util.Locale.US, "%02d", secs % 60);
+        String t = String.valueOf(secs);
+        return t.length() == 1 ? "  " + t : " " + t;
+    }
+
+    /** Race distance covered, less any penalty laps. */
+    float score(Boat b) {
+        return b.progress - b.penaltyLaps * track.length;
+    }
+
+    /** Elapsed time plus time penalties. */
+    float totalTime(Boat b) {
+        return b.finishTime + b.penaltyTime;
+    }
+
+    /** A boat broke a rule: buoy hit or cut, or a jump start. */
+    private void infraction(Boat b, String what, String call) {
+        if (b.infractionCooldown > 0) return;
+        b.infractionCooldown = 2.5f;
+        b.infractions++;
+        b.lastInfraction = what;
+        String pen = "";
+        if (rules == RULES_TIME) { b.penaltyTime += PENALTY_SECONDS; pen = "  +" + (int) PENALTY_SECONDS + " SEC"; }
+        else if (rules == RULES_LAP) { b.penaltyLaps++; pen = "  +1 LAP"; }
+        if (b.isPlayer) {
+            setMessage(what + pen, 2.2f);
+            if (call != null) announcer.say(call, 0, "penalty", 6f, Announcer.IMPORTANT);
+        }
     }
 
     synchronized void toggleView() {
@@ -259,18 +365,28 @@ final class Game {
                 countdown -= dt;
                 int after = (int) Math.ceil(countdown);
                 boolean voice = announcerOn && soundOn;
+                if (clockStart) {
+                    // boats run during the clock; the beeps cover the last 5 seconds
+                    paceAi();
+                    simulate(dt, false);
+                    if (after != before && after <= 5 && after > 3 && countdown > 0) beepRequest = 520;
+                    clockCalls();
+                }
                 if (countdown <= 0) {
+                    if (clockStart) startFromClock();
                     state = State.RACING;
                     if (!voice) beepRequest = 1040;
                     setMessage("GO!", 1.0f);
                     announcer.enabled = announcerOn;
-                    announcer.say("go", 2, "count", 0f, Announcer.URGENT);
+                    // the clock's "Race! Race! Race!" call, or the standing start's "Go!"
+                    if (!(clockStart && announcer.say("race", 0, "count", 0f, Announcer.URGENT)))
+                        announcer.say("go", 2, "count", 0f, Announcer.URGENT);
                 } else if (after != before && after <= 3) {
                     if (!voice) beepRequest = 520;
                     announcer.enabled = announcerOn;
                     announcer.say("count_" + after, 0, "count", 0f, Announcer.URGENT);
                 }
-                for (Boat b : boats) { b.throttle = 0; b.steer = 0; }
+                if (!clockStart) for (Boat b : boats) { b.throttle = 0; b.steer = 0; }
                 break;
             }
             case RACING:
@@ -303,10 +419,10 @@ final class Game {
             }
         }
         // rubber banding: keep the pack close to the player
-        if (player != null && !player.finished) {
+        if (player != null && !player.finished && state != State.COUNTDOWN) {
             for (Boat b : boats) {
                 if (b == player) continue;
-                float gap = b.progress - player.progress;
+                float gap = score(b) - score(player);
                 float target = 1f;
                 if (gap < -25f) target = 1.07f;
                 else if (gap > 35f) target = 0.95f;
@@ -322,6 +438,7 @@ final class Game {
         }
 
         for (Boat b : boats) {
+            if (b.infractionCooldown > 0) b.infractionCooldown -= dt;
             updateProgress(b, dt, demo);
             emitWake(b, dt);
         }
@@ -374,7 +491,24 @@ final class Game {
                         b.vz *= 0.8f;
                         buoyWobble[k] = Math.min(1f, buoyWobble[k] + Math.abs(vn) * 0.12f);
                         if (b.isPlayer && vn < -1.5f) evBuoy = true;
+                        if (state == State.RACING && rules != RULES_FUN && !b.finished && vn < -0.4f) {
+                            int num = (int) bu[3];
+                            infraction(b, num > 0 ? "HIT BUOY " + num : "HIT BUOY", null);
+                        }
                     }
+                }
+            }
+            // the start clock floats in the infield of the IMPBA ovals
+            if (track.impba) {
+                float cmin = Boat.RADIUS + 1.1f;
+                float dx = b.x - track.clockX, dz = b.z - track.clockZ;
+                float d2 = dx * dx + dz * dz;
+                if (d2 < cmin * cmin && d2 > 1e-6f) {
+                    float d = (float) Math.sqrt(d2);
+                    b.x = track.clockX + dx / d * cmin;
+                    b.z = track.clockZ + dz / d * cmin;
+                    float vn = (b.vx * dx + b.vz * dz) / d;
+                    if (vn < 0) { b.vx -= dx / d * vn * 1.4f; b.vz -= dz / d * vn * 1.4f; }
                 }
             }
             // boat vs shore / island
@@ -406,8 +540,11 @@ final class Game {
         float dist = track.distTo(idx, b.x, b.z);
         if (dist < Track.HALF_WIDTH + 5f) {
             int diff = idx - b.trackIdx;
-            if (diff < -Track.N / 2) b.lapWrap++;
-            else if (diff > Track.N / 2) b.lapWrap--;
+            if (diff < -Track.N / 2) {
+                b.lapWrap++;
+                if (state == State.COUNTDOWN && clockStart) b.lastCrossClock = countdown;
+            } else if (diff > Track.N / 2) b.lapWrap--;
+            if (track.impba && state == State.RACING && !demo && !b.finished) checkCuts(b, b.trackIdx, idx);
             b.trackIdx = idx;
             b.offCourseTime = 0;
         } else {
@@ -415,6 +552,7 @@ final class Game {
         }
         float along = Boat.clamp(track.along(b.trackIdx, b.x, b.z), -track.ds, track.ds);
         b.progress = b.lapWrap * track.length + track.cum[b.trackIdx] + along;
+        if (state == State.COUNTDOWN) return;   // clock start: nothing counts until zero
 
         // wrong way?
         float vt = b.vx * track.tx[b.trackIdx] + b.vz * track.tz[b.trackIdx];
@@ -436,7 +574,7 @@ final class Game {
             // demo boats just keep lapping
             return;
         }
-        if (!b.finished && b.progress >= laps * track.length) {
+        if (!b.finished && score(b) >= laps * track.length) {
             b.finished = true;
             b.finishTime = raceTime;
             if (b.isPlayer) {
@@ -519,7 +657,7 @@ final class Game {
         // ---- laps to go, counted on the race leader ----
         int leadLap = 1;
         for (Boat b : boats) {
-            leadLap = Math.max(leadLap, Math.min(laps, (int) Math.floor(b.progress / track.length) + 1));
+            leadLap = Math.max(leadLap, Math.min(laps, (int) Math.floor(score(b) / track.length) + 1));
         }
         if (leadLap > annLeaderLap) {
             annLeaderLap = leadLap;
@@ -570,14 +708,79 @@ final class Game {
         }
     }
 
+    /**
+     * IMPBA ovals: a boat must keep every buoy on its left (inside). Passing a buoy's
+     * position on the inside of it is a cut.
+     */
+    private void checkCuts(Boat b, int from, int to) {
+        int step = to - from;
+        if (step < -Track.N / 2) step += Track.N;
+        if (step <= 0 || step > 40) return;   // only forward progress counts
+        for (float[] bu : track.buoys) {
+            int bi = (int) bu[4];
+            int rel = bi - from;
+            if (rel <= 0) rel += Track.N;
+            if (rel > step) continue;
+            float lat = (b.x - track.px[bi]) * track.nx(bi) + (b.z - track.pz[bi]) * track.nz(bi);
+            if (lat > bu[5]) {
+                int num = (int) bu[3];
+                infraction(b, num > 0 ? "CUT BUOY " + num : "CUT A BUOY", "cut");
+            }
+        }
+    }
+
+    /** Clock start, AI: hold the speed that reaches the start line just after zero. */
+    private void paceAi() {
+        for (Boat b : boats) {
+            if (!b.autopilot || b.isPlayer) continue;
+            float pos = track.cum[b.trackIdx] + Boat.clamp(track.along(b.trackIdx, b.x, b.z), -track.ds, track.ds);
+            float d = track.length - pos;
+            if (d < 0) d += track.length;
+            float t = countdown + b.startDelay;
+            float avg = b.maxSpeed * 0.82f;     // average lap speed, turns included
+            float v = (d + 0f) / t;
+            if (v > avg) { b.paceSpeed = -1; continue; }   // late: go flat out
+            int k = 0;
+            while ((d + (k + 1) * track.length) / t <= avg) k++;
+            v = (d + k * track.length) / t;
+            b.paceSpeed = Math.max(1.5f, v);
+        }
+    }
+
+    /** Clock start: at zero the race is on; laps count from each boat's next line crossing. */
+    private void startFromClock() {
+        for (Boat b : boats) {
+            b.paceSpeed = -1;
+            boolean jumped = b.lastCrossClock > 0 && b.lastCrossClock <= JUMP_WINDOW;
+            // a boat that crossed in the last seconds is counted as started, but jumped
+            b.lapWrap = jumped ? 0 : -1;
+            float along = Boat.clamp(track.along(b.trackIdx, b.x, b.z), -track.ds, track.ds);
+            b.progress = b.lapWrap * track.length + track.cum[b.trackIdx] + along;
+            if (jumped && rules != RULES_FUN) infraction(b, "JUMP START", "jump");
+            else if (jumped && b.isPlayer) setMessage("EARLY!", 1.5f);
+        }
+    }
+
+    /** Clock start: the announcer marks the time left. */
+    private void clockCalls() {
+        float[] marks = {120f, 60f, 30f, 10f};
+        for (float m : marks) {
+            if (clockCallAt > m && countdown <= m) {
+                announcer.enabled = announcerOn;
+                announcer.say("clock_" + (int) m, 0, "clock", 0f, Announcer.IMPORTANT);
+            }
+        }
+        clockCallAt = countdown;
+    }
+
     private void rank() {
         Arrays.sort(order, new Comparator<Boat>() {
             @Override
             public int compare(Boat a, Boat b) {
-                if (a.finished && b.finished) return Float.compare(a.finishTime, b.finishTime);
+                if (a.finished && b.finished) return Float.compare(totalTime(a), totalTime(b));
                 if (a.finished) return -1;
                 if (b.finished) return 1;
-                return Float.compare(b.progress, a.progress);
+                return Float.compare(score(b), score(a));
             }
         });
     }
@@ -588,7 +791,7 @@ final class Game {
     }
 
     int currentLap(Boat b) {
-        int lap = (int) Math.floor(b.progress / track.length) + 1;
+        int lap = (int) Math.floor(score(b) / track.length) + 1;
         return Math.max(1, Math.min(laps, lap));
     }
 

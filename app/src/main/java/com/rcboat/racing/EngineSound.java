@@ -4,7 +4,11 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
 
-/** Synthesised electric RC-boat motor whine, water hiss and countdown beeps. */
+/**
+ * Synthesised RC-boat power plant: an electric motor's whine, or a two-stroke gas engine
+ * (exhaust pulses through a canister muffler; the twin has two slightly unsynchronised
+ * cylinders), plus water hiss and countdown beeps.
+ */
 final class EngineSound implements Runnable {
     private static final int RATE = 22050;
     private final Game game;
@@ -43,7 +47,8 @@ final class EngineSound implements Runnable {
             return;
         }
         short[] buf = new short[512];
-        double phase = 0, phase2 = 0, beepPhase = 0;
+        double phase = 0, phase2 = 0, beepPhase = 0, gp1 = 0, gp2 = 0.37;
+        float muff = 0, muff2 = 0, burble = 0;
         float vol = 0, freq = 120, hissLp = 0;
         int beepLeft = 0;
         float beepFreq = 0;
@@ -57,10 +62,13 @@ final class EngineSound implements Runnable {
                 beepPhase = 0;
             }
             boolean on = game.soundOn && game.engineOn;
+            boolean gas = game.power != Game.ELECTRIC;
+            boolean twin = game.power == Game.GAS_TWIN;
             float lvl = game.engineLevel, thr = game.engineThrottle;
-            float targetVol = on ? 0.07f + 0.15f * thr + 0.06f * lvl : 0f;
+            float targetVol = on ? (gas ? 0.16f + 0.14f * thr + 0.06f * lvl : 0.07f + 0.15f * thr + 0.06f * lvl) : 0f;
             if (game.talking) targetVol *= 0.2f;   // duck well under the announcers
-            float targetFreq = 110f + 520f * lvl + 90f * thr;
+            // gas: firing rate from ~2,800 rpm idle to ~16,000 rpm flat out
+            float targetFreq = gas ? 46f + 200f * lvl + 30f * thr : 110f + 520f * lvl + 90f * thr;
             boolean beepOn = game.soundOn;
             for (int i = 0; i < buf.length; i++) {
                 vol += (targetVol - vol) * 0.0015f;
@@ -73,7 +81,28 @@ final class EngineSound implements Runnable {
                 float sq = phase2 < 0.5 ? 0.6f : -0.6f;
                 float hiss = rnd.nextFloat() * 2 - 1;
                 hissLp += (hiss - hissLp) * 0.25f;
-                float s = (saw * 0.45f + sq * 0.25f) * vol + hissLp * vol * (0.25f + lvl * 0.5f);
+                float s;
+                if (gas) {
+                    // each firing: a sharp exhaust pop that rings and decays
+                    gp1 += freq / RATE;
+                    if (gp1 > 1) gp1 -= 1;
+                    float pop = (float) (Math.exp(-gp1 * 7.0) * Math.sin(gp1 * 2 * Math.PI * 2.6));
+                    if (twin) {
+                        gp2 += freq * 1.004 / RATE;
+                        if (gp2 > 1) gp2 -= 1;
+                        pop = pop * 0.6f + 0.6f * (float) (Math.exp(-gp2 * 7.0) * Math.sin(gp2 * 2 * Math.PI * 2.4));
+                    }
+                    float rough = hiss * (float) Math.exp(-gp1 * 5.0) * (0.35f + 0.4f * thr);
+                    float raw = pop + rough;
+                    // canister muffler: a gentle low-pass that opens up with throttle
+                    float k = 0.12f + 0.25f * thr + 0.1f * lvl;
+                    muff += (raw - muff) * k;
+                    muff2 += (muff - muff2) * k;
+                    burble += ((rnd.nextFloat() - 0.5f) - burble) * 0.002f;   // idle unevenness
+                    s = muff2 * vol * 1.6f * (1f + burble * (1f - thr)) + hissLp * vol * lvl * 0.35f;
+                } else {
+                    s = (saw * 0.45f + sq * 0.25f) * vol + hissLp * vol * (0.25f + lvl * 0.5f);
+                }
                 if (beepLeft > 0) {
                     beepPhase += beepFreq / RATE;
                     float env = Math.min(1f, beepLeft / 800f);

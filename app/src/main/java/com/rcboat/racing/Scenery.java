@@ -9,7 +9,9 @@ final class Scenery {
     /** Haze colour (before tone mapping); matches the horizon of the sky panorama. */
     static final float[] FOG = {0.494f, 0.521f, 0.615f};
 
-    Mesh sky, terrain, water, props, island, islandProps, buoyRed, buoyYellow, marker;
+    Mesh sky, terrain, water, props, island, islandProps, buoyRed, buoyYellow, buoyTurn, buoyPlain, marker;
+    /** Start clock body and one 7-segment bar (unit size, drawn per lit segment). */
+    Mesh clockBody, segment;
     Mesh foliage, islandFoliage;   // alpha-tested cards (trees near the lake, grass, reeds)
     Mesh bark, wood, rocks, islandBark;   // photo-textured (triplanar): tree trunks, platform timber, boulders
     private MeshBuilder foliageB, islandFoliageB, barkB, woodB, rocksB, islandBarkB;
@@ -29,6 +31,10 @@ final class Scenery {
         props = buildProps(game);
         buoyRed = buildBuoy(0.95f, 0.18f, 0.12f);
         buoyYellow = buildBuoy(1.0f, 0.78f, 0.08f);
+        buoyTurn = buildTurnBuoy();
+        buoyPlain = buildBuoy(0.96f, 0.96f, 0.94f);
+        clockBody = buildClock();
+        segment = buildSegment();
         marker = buildMarker();
         island = buildIsland();
         islandProps = buildIslandProps();
@@ -610,6 +616,43 @@ final class Scenery {
         mb.cylinder(0, -0.3f, 0, 0.36f, 0.32f, 0.65f, 12, r, g, b, true);
         mb.cylinder(0, 0.35f, 0, 0.32f, 0.3f, 0.12f, 12, 0.97f, 0.97f, 0.97f, false);
         mb.cylinder(0, 0.47f, 0, 0.3f, 0f, 0.5f, 12, r, g, b, true);
+        return mb.build();
+    }
+
+    /** IMPBA turn buoy: larger, Day-Glo orange with a black band (seen easily from shore). */
+    private static Mesh buildTurnBuoy() {
+        MeshBuilder mb = new MeshBuilder();
+        mb.cylinder(0, -0.3f, 0, 0.42f, 0.38f, 0.75f, 14, 1.0f, 0.38f, 0.04f, true);
+        mb.cylinder(0, 0.45f, 0, 0.38f, 0.36f, 0.16f, 14, 0.05f, 0.05f, 0.05f, false);
+        mb.cylinder(0, 0.61f, 0, 0.36f, 0f, 0.55f, 14, 1.0f, 0.38f, 0.04f, true);
+        return mb.build();
+    }
+
+    /** Clock face width and height, and where the digits sit on it (local, facing +z). */
+    static final float CLOCK_W = 2.1f, CLOCK_H = 1.0f, CLOCK_Y0 = 0.35f;
+    static final float DIGIT_H = 0.61f;   // 24-inch digits, the largest the rules allow
+
+    /**
+     * IMPBA digital start clock: black face, white enclosure, on styrofoam floats, its
+     * bottom 6-18 in above the water. Local origin on the water, face towards +z.
+     */
+    private static Mesh buildClock() {
+        MeshBuilder mb = new MeshBuilder();
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 0.7f, 0.05f, 0, 0.6f, 0.3f, 0.9f, 0, 0.95f, 0.95f, 0.92f);     // floats
+            mb.box(s * 0.7f, 0.25f, 0, 0.08f, 0.2f, 0.08f, 0, 0.8f, 0.8f, 0.82f);    // legs
+        }
+        mb.box(0, 0.2f, 0, 1.9f, 0.05f, 0.9f, 0, 0.7f, 0.7f, 0.72f);                 // deck
+        mb.box(0, CLOCK_Y0 + CLOCK_H / 2, -0.06f, CLOCK_W, CLOCK_H, 0.24f, 0, 0.92f, 0.92f, 0.9f);
+        mb.box(0, CLOCK_Y0 + CLOCK_H / 2, 0.065f, CLOCK_W - 0.1f, CLOCK_H - 0.1f, 0.01f, 0,
+                0.03f, 0.03f, 0.035f);                                                // black face
+        return mb.build();
+    }
+
+    /** A unit bar for one lit segment, bright Day-Glo orange; scaled when drawn. */
+    private static Mesh buildSegment() {
+        MeshBuilder mb = new MeshBuilder();
+        mb.box(0, 0, 0, 1f, 1f, 1f, 0, 1.0f, 0.55f, 0.1f);
         return mb.build();
     }
 

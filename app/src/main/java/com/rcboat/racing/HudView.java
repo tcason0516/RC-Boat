@@ -105,39 +105,56 @@ final class HudView extends View {
 
         textC(c, "RC BOAT RACING", w / 2f, py + 10 * u, 8.5f * u, Color.WHITE);
         final Game g = game;
-        textC(c, Track.NAMES[g.trackId] + "  \u2022  " + Boat.HULL_NAMES[g.hull] + ": "
-                + Boat.HULL_INFO[g.hull], w / 2f, py + 16.5f * u, 3.8f * u, 0xFF9FD8FF);
+        Track tr = g.track;
+        String line1 = tr.name + (tr.impba ? " (" + tr.info + ")" : "") + "  \u2022  "
+                + Boat.HULL_NAMES[g.hull] + ": " + Boat.HULL_INFO[g.hull];
+        String line2 = Game.POWER_INFO[g.power] + "  \u2022  " + Game.RULE_INFO[g.rules];
+        textC(c, line1, w / 2f, py + 15.5f * u, 3.4f * u, 0xFF9FD8FF);
+        textC(c, line2, w / 2f, py + 19.5f * u, 3.4f * u, 0xFF9FD8FF);
 
         float colW = (pw - 6 * u) / 2f;
-        float rowH = 11.4f * u;
+        float rowH = 9.4f * u;
         float x0 = px + 3 * u, x1 = px + 3 * u + colW;
-        float y0 = py + 19 * u;
+        float y0 = py + 21.5f * u;
 
-        row(c, x0, y0, colW, rowH, "Track", Track.NAMES[g.trackId],
+        int nP = Game.POWER_NAMES.length;
+        row(c, x0, y0, colW, rowH, "Track", shortTrack(tr),
                 () -> g.setTrack(g.trackId - 1), () -> g.setTrack(g.trackId + 1));
         row(c, x0, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
                 () -> g.hull = (g.hull + 2) % 3, () -> g.hull = (g.hull + 1) % 3);
-        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
+                () -> g.power = (g.power + nP - 1) % nP, () -> g.power = (g.power + 1) % nP);
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
                 () -> g.opponents = Math.max(0, g.opponents - 1),
                 () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
-        row(c, x0, y0 + 3 * rowH, colW, rowH, "Laps", String.valueOf(g.laps),
+        row(c, x0, y0 + 4 * rowH, colW, rowH, "Laps", String.valueOf(g.laps),
                 () -> g.laps = Math.max(1, g.laps - 1),
                 () -> g.laps = Math.min(9, g.laps + 1));
-        row(c, x0, y0 + 4 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+        row(c, x0, y0 + 5 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
                 () -> g.difficulty = Math.max(0, g.difficulty - 1),
                 () -> g.difficulty = Math.min(2, g.difficulty + 1));
-        row(c, x1, y0, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
+        row(c, x1, y0, colW, rowH, "Start", Game.START_NAMES[g.startMode],
+                () -> g.startMode = (g.startMode + 2) % 3, () -> g.startMode = (g.startMode + 1) % 3);
+        row(c, x1, y0 + rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
+                () -> g.rules = (g.rules + 2) % 3, () -> g.rules = (g.rules + 1) % 3);
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
                 () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
-        row(c, x1, y0 + rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
                 () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
-        row(c, x1, y0 + 2 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
                 () -> g.soundOn = !g.soundOn, () -> g.soundOn = !g.soundOn);
-        row(c, x1, y0 + 3 * rowH, colW, rowH, "Announcer", g.announcerOn ? "On" : "Off",
+        row(c, x1, y0 + 5 * rowH, colW, rowH, "Announcer", g.announcerOn ? "On" : "Off",
                 () -> g.announcerOn = !g.announcerOn, () -> g.announcerOn = !g.announcerOn);
 
         float bw = 56 * u, bh = 11 * u;
         button(c, (w - bw) / 2f, py + ph - bh - 3 * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.5f * u,
                 game::startRace);
+    }
+
+    /** Track name short enough for the menu's value box. */
+    private static String shortTrack(Track t) {
+        return t.impba ? t.name.replace("IMPBA ", "").replace(" Mile", " mi").replace(" Electric", " mi elec.")
+                .replace(" mi mi", " mi") : t.name;
     }
 
     private void row(Canvas c, float x, float y, float cw, float rh, String label, String value,
@@ -165,7 +182,8 @@ final class HudView extends View {
         int n = game.boats.length;
 
         // ---- info box ----
-        panel(c, 2 * u, 2 * u, 36 * u, 24 * u);
+        boolean pen = p.penaltyLaps > 0 || p.penaltyTime > 0;
+        panel(c, 2 * u, 2 * u, 36 * u, pen ? 30 * u : 24 * u);
         text.setTextAlign(Paint.Align.LEFT);
         text.setColor(Color.WHITE);
         text.setTextSize(9 * u);
@@ -180,6 +198,12 @@ final class HudView extends View {
         text.setColor(0xFFFFE082);
         float shown = p.finished ? p.finishTime : game.raceTime;
         c.drawText(Game.formatTime(shown), 5 * u, 23.5f * u, text);
+        if (pen) {
+            text.setColor(0xFFFF8A65);
+            text.setTextSize(3.6f * u);
+            c.drawText(p.penaltyLaps > 0 ? "PENALTY +" + p.penaltyLaps + " LAP" + (p.penaltyLaps > 1 ? "S" : "")
+                    : "PENALTY +" + Math.round(p.penaltyTime) + " SEC", 5 * u, 29.5f * u, text);
+        }
 
         // ---- minimap ----
         drawMinimap(c, w - 2 * u - 40 * u, 2 * u, 40 * u, 28 * u);
@@ -195,11 +219,14 @@ final class HudView extends View {
                 () -> g.soundOn = !g.soundOn);
 
         // ---- center messages ----
-        if (game.state == Game.State.COUNTDOWN) {
+        if (game.state == Game.State.COUNTDOWN && game.clockStart) {
+            drawClockHud(c, w, h, p);
+        } else if (game.state == Game.State.COUNTDOWN) {
             int num = Math.min(3, (int) Math.ceil(game.countdown));
             textShadow(c, String.valueOf(num), w / 2f, h * 0.45f, 26 * u, 0xFFFFD54F);
             textShadow(c, "GET READY", w / 2f, h * 0.45f + 10 * u, 5 * u, Color.WHITE);
-        } else if (game.messageTime > 0 && game.message.length() > 0) {
+        }
+        if (game.state != Game.State.COUNTDOWN && game.messageTime > 0 && game.message.length() > 0) {
             textShadow(c, game.message, w / 2f, h * 0.36f, 10 * u, Color.WHITE);
         }
         if (game.state == Game.State.RACING && !p.finished) {
@@ -232,6 +259,30 @@ final class HudView extends View {
         } else if (game.state == Game.State.FINISHED && game.finishedFor > 2.5f) {
             drawResults(c, w, h);
         }
+    }
+
+    /** Clock start: the start clock, distance to the line and the jump-start warning. */
+    private void drawClockHud(Canvas c, int w, int h, Boat p) {
+        int secs = (int) Math.ceil(game.countdown);
+        String t = secs >= 60 ? (secs / 60) + ":" + String.format(java.util.Locale.US, "%02d", secs % 60)
+                : String.valueOf(secs);
+        boolean last = game.countdown <= Game.JUMP_WINDOW;
+        float cy = 24 * u;
+        panel(c, w / 2f - 17 * u, 13 * u, 34 * u, 17 * u);
+        textC(c, t, w / 2f, cy + 3 * u, 11 * u, last ? 0xFFFF5252 : 0xFFFFB74D);
+        textC(c, "START CLOCK", w / 2f, 17 * u, 2.8f * u, 0xFFB8D4E8);
+        Track tr = game.track;
+        float pos = tr.cum[p.trackIdx] + Boat.clamp(tr.along(p.trackIdx, p.x, p.z), -tr.ds, tr.ds);
+        float d = tr.length - pos;
+        if (d < 0) d += tr.length;
+        float ft = d / 0.3048f;
+        String hint;
+        int col = Color.WHITE;
+        if (last) { hint = "DON'T CROSS THE LINE BEFORE ZERO"; col = 0xFFFF5252; }
+        else hint = "Start line in " + Math.round(ft) + " ft  \u2022  hit it at zero";
+        textShadow(c, hint, w / 2f, 36 * u, 4 * u, col);
+        if (game.messageTime > 0 && game.message.length() > 0)
+            textShadow(c, game.message, w / 2f, h * 0.45f, 8 * u, Color.WHITE);
     }
 
     private void layoutSticks(int w, int h) {
@@ -379,9 +430,17 @@ final class HudView extends View {
             fill.setColor(Color.rgb((int) (b.r * 255), (int) (b.g * 255), (int) (b.b * 255)));
             c.drawCircle(px + 23 * u, y + rowH / 2f, 2 * u, fill);
             c.drawText(b.name, px + 28 * u, ty, text);
+            if (b.infractions > 0 && game.rules != Game.RULES_FUN) {
+                text.setTextSize(3.2f * u);
+                text.setColor(0xFFFF8A65);
+                String pen = game.rules == Game.RULES_LAP ? "+" + b.penaltyLaps + " lap" : "+" + Math.round(b.penaltyTime) + "s";
+                c.drawText(pen, px + 62 * u, ty, text);
+                text.setTextSize(4.4f * u);
+                text.setColor(Color.WHITE);
+            }
             text.setTextAlign(Paint.Align.RIGHT);
             String tm;
-            if (b.finished) tm = Game.formatTime(b.finishTime);
+            if (b.finished) tm = Game.formatTime(game.totalTime(b));
             else tm = "Lap " + game.currentLap(b) + "...";
             text.setColor(b.finished ? 0xFFFFE082 : 0xFF9FB4C4);
             c.drawText(tm, px + pw - 6 * u, ty, text);

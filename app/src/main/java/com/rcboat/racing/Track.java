@@ -13,8 +13,29 @@ final class Track {
 
     static final String[] NAMES = {
             "Island Loop", "Grand Oval", "Kidney Bean", "Figure Eight", "Triangle",
-            "Serpentine", "Dog Bone", "Clover", "Speedway", "Heart"
+            "Serpentine", "Dog Bone", "Clover", "Speedway", "Heart",
+            "IMPBA 1/3 Mile Oval", "IMPBA 1/4 Mile Oval", "IMPBA 1/5 Mile Electric"
     };
+    /** First of the official IMPBA courses (Technical Standards, section V). */
+    static final int FIRST_IMPBA = 10;
+
+    // Buoy types (float[2] of each buoy)
+    static final int BUOY_LEFT = 0, BUOY_RIGHT = 1, BUOY_TURN = 2, BUOY_PLAIN = 3;
+
+    private static final float FT = 0.3048f;
+    /**
+     * IMPBA approved ovals: straight (chute) length and turn radius in feet, and whether
+     * entrance buoys are used (1/3-mile oval only). Lengths are from the rule book.
+     */
+    private static final float[][] IMPBA = {
+            {330.05f, 35f, 1},   // 1/3-mile oval: 880 ft around
+            {282.87f, 15f, 0},   // 1/4-mile oval: 660 ft around
+            {170f, 30f, 0},      // 1/5-mile electric oval: 528.5 ft around
+    };
+    /** Front chute (buoys 6 to 1) distance from shore: the rules allow 50 to 150 ft. */
+    private static final float FRONT_CHUTE_FT = 75f;
+    /** How far outside the buoy line the racing line runs. */
+    private static final float IMPBA_LINE_OFFSET = 3.8f;
     static final int COUNT = NAMES.length;
 
     private static final Track[] CACHE = new Track[COUNT];
@@ -28,6 +49,13 @@ final class Track {
     final String name;
     final boolean hasIsland;     // the layout leaves room for the central island
     final boolean crosses;       // the layout crosses itself (figure eight)
+    final boolean impba;         // an official IMPBA oval: buoys only mark the inside of the turns
+    /** AI lane limits (metres from the centre line, positive = left / inside on the ovals). */
+    float laneMin = -(HALF_WIDTH - 2.2f), laneMax = HALF_WIDTH - 2.2f;
+    /** Official course figures for the menu, e.g. "880 ft around, 35 ft turns". */
+    String info = "";
+    /** Where the floating start clock stands (IMPBA ovals: inside the course, mid-straight). */
+    float clockX, clockZ;
 
     final float[] px = new float[N], pz = new float[N];
     final float[] tx = new float[N], tz = new float[N];   // unit tangent
@@ -36,17 +64,25 @@ final class Track {
     float ds;
     float minX, maxX, minZ, maxZ;
 
-    /** Buoys: x, z, side (0 = left/red, 1 = right/yellow). */
+    /**
+     * Buoys: x, z, type (BUOY_*), number (IMPBA turn buoys 1-6, else 0), course sample
+     * index level with the buoy, and its offset from the centre line (positive = left).
+     */
     final ArrayList<float[]> buoys = new ArrayList<>();
 
     private Track(int id) {
         this.id = id;
         this.name = NAMES[id];
-        this.hasIsland = id != 3 && id != 6 && id != 7 && id != 9;
+        this.impba = id >= FIRST_IMPBA;
+        this.hasIsland = !impba && id != 3 && id != 6 && id != 7 && id != 9;
         this.crosses = id == 3;
-        build(controlPoints(id));
-        chooseStart();
-        placeBuoys();
+        if (impba) {
+            buildOval(IMPBA[id - FIRST_IMPBA]);
+        } else {
+            build(controlPoints(id));
+            chooseStart();
+            placeBuoys();
+        }
         minX = minZ = Float.MAX_VALUE;
         maxX = maxZ = -Float.MAX_VALUE;
         for (int i = 0; i < N; i++) {
@@ -125,6 +161,66 @@ final class Track {
 
     // ------------------------------------------------------------------ construction
 
+    /**
+     * An IMPBA oval laid out parallel to the south shore, run counter-clockwise (left turns).
+     * Buoys 1-3 mark the east turn and 4-6 the west turn; boats keep them on their left.
+     * The start / finish line is in the middle of the front chute, in front of the drivers.
+     */
+    private void buildOval(float[] spec) {
+        float L = spec[0] * FT, R = spec[1] * FT;
+        boolean entrance = spec[2] > 0;
+        float shore = World.southShoreZ();
+        float zFront = shore - FRONT_CHUTE_FT * FT;   // buoy line of the front chute
+        float cz = zFront - R;                         // centre of the course
+        float rc = R + IMPBA_LINE_OFFSET;              // racing line radius in the turns
+        info = Math.round(2 * spec[0] + 2 * Math.PI * spec[1]) + " ft around, "
+                + Math.round(spec[1]) + " ft turns";
+
+        // centre line: start in the middle of the front chute heading east, then the
+        // east turn, the back chute heading west, the west turn and back to the start
+        int fine = 8000;
+        float total = 2 * L + 2 * (float) Math.PI * rc;
+        float[] fx = new float[fine + 1], fz = new float[fine + 1], fc = new float[fine + 1];
+        for (int i = 0; i <= fine; i++) {
+            float s = total * i / fine;
+            float x, z;
+            if (s < L / 2) { x = s; z = cz + rc; }
+            else if ((s -= L / 2) < Math.PI * rc) {
+                double a = s / rc;   // east turn, from south round to north
+                x = L / 2 + rc * (float) Math.sin(a); z = cz + rc * (float) Math.cos(a);
+            } else if ((s -= (float) Math.PI * rc) < L) { x = L / 2 - s; z = cz - rc; }
+            else if ((s -= L) < Math.PI * rc) {
+                double a = s / rc;   // west turn, from north round to south
+                x = -L / 2 - rc * (float) Math.sin(a); z = cz - rc * (float) Math.cos(a);
+            } else { s -= (float) Math.PI * rc; x = -L / 2 + s; z = cz + rc; }
+            fx[i] = x; fz[i] = z;
+            fc[i] = total * i / fine;
+        }
+        resample(fx, fz, fc, fine);
+
+        // the six numbered turn buoys
+        float[][] turn = {
+                {L / 2, cz + R}, {L / 2 + R, cz}, {L / 2, cz - R},
+                {-L / 2, cz - R}, {-L / 2 - R, cz}, {-L / 2, cz + R}};
+        for (int k = 0; k < 6; k++) addBuoy(turn[k][0], turn[k][1], BUOY_TURN, k + 1);
+        // unnumbered: start / finish buoy, and entrance buoys on the 1/3-mile course
+        addBuoy(0, cz + R, BUOY_PLAIN, 0);
+        if (entrance) {
+            addBuoy(L / 4, cz + R, BUOY_PLAIN, 0);     // halfway from start / finish to buoy 1
+            addBuoy(-L / 4, cz - R, BUOY_PLAIN, 0);    // halfway from the centre to buoy 4
+        }
+        clockX = 0;
+        clockZ = cz;
+        laneMin = -3.5f;
+        laneMax = IMPBA_LINE_OFFSET - 2.0f;
+    }
+
+    private void addBuoy(float x, float z, int type, int number) {
+        int idx = nearestGlobal(x, z);
+        float lat = (x - px[idx]) * nx(idx) + (z - pz[idx]) * nz(idx);
+        buoys.add(new float[]{x, z, type, number, idx, lat});
+    }
+
     private static float cr(float p0, float p1, float p2, float p3, float t) {
         float t2 = t * t, t3 = t2 * t;
         return 0.5f * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
@@ -148,6 +244,11 @@ final class Track {
                 fc[i] = fc[i - 1] + (float) Math.sqrt(dx * dx + dz * dz);
             }
         }
+        resample(fx, fz, fc, fineN);
+    }
+
+    /** Resamples a fine polyline (with cumulative lengths) into N evenly spaced points. */
+    private void resample(float[] fx, float[] fz, float[] fc, int fineN) {
         length = fc[fineN];
         ds = length / N;
         int j = 0;
@@ -228,7 +329,10 @@ final class Track {
                     float lim = gap > sep ? HALF_WIDTH + 1.5f : HALF_WIDTH - 1f;
                     if (d2 < lim * lim) ok = false;
                 }
-                if (ok) buoys.add(new float[]{bx, bz, side});
+                if (ok) {
+                    float lat = HALF_WIDTH * s;
+                    buoys.add(new float[]{bx, bz, side, 0, i, lat});
+                }
             }
         }
     }

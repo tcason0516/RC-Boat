@@ -25,7 +25,11 @@ final class Boat {
     final float r, g, b;
     final boolean isPlayer;
     final int hull;
-    final float topSpeed, accel, turnRate, grip;
+    float topSpeed, accel;
+    final float turnRate, grip;
+    /** Throttle response time (s): gas engines take a moment to rev up, electric is instant. */
+    float throttleLag = 0.05f;
+    float throttleNow;         // throttle after the engine's response
 
     // physics
     float x, z, heading;
@@ -56,6 +60,16 @@ final class Boat {
     float wrongWayTime;
     float lastAlong;
 
+    // rules
+    int penaltyLaps;           // laps added by penalties
+    float penaltyTime;         // seconds added to the finish time by penalties
+    int infractions;           // buoys hit or cut, jump starts
+    String lastInfraction = "";
+    float infractionCooldown;
+    float lastCrossClock = -1; // clock-start: clock reading when the start line was last crossed
+    /** Clock-start pacing for the AI: average speed to hold (m/s), or -1 for none. */
+    float paceSpeed = -1;
+    float startDelay;          // AI: how late after zero it aims to hit the line
     Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
         this.hull = hull;
@@ -90,6 +104,7 @@ final class Boat {
         vx = vz = 0;
         yawRate = 0;
         throttle = steer = 0;
+        throttleNow = 0;
         offCourseTime = 0;
         wrongWayTime = 0;
         stuckTimer = 0;
@@ -100,15 +115,23 @@ final class Boat {
         laneTimer -= dt;
         if (laneTimer <= 0) {
             laneTimer = 2f + rnd.nextFloat() * 4f;
-            laneTarget = (rnd.nextFloat() * 2f - 1f) * (Track.HALF_WIDTH - 2.2f);
+            laneTarget = t.laneMin + rnd.nextFloat() * (t.laneMax - t.laneMin);
         }
         lane += (laneTarget - lane) * Math.min(1f, dt * 0.8f);
 
         float spd = Math.max(0f, forwardSpeed());
-        float look = 6f + spd * 0.55f;
+        float look = t.impba ? 4f + spd * 0.4f : 6f + spd * 0.55f;
         int ti = t.wrap(trackIdx + Math.round(look / t.ds));
-        float tgx = t.px[ti] + t.nx(ti) * lane;
-        float tgz = t.pz[ti] + t.nz(ti) * lane;
+        float aim = lane;
+        if (t.impba) {
+            // aiming at a point ahead cuts the corner; on the ovals that would clip the
+            // turn buoys, so aim wide by the chord's sag (look * angle / 8) and a margin
+            float dot = clamp(t.tx[trackIdx] * t.tx[ti] + t.tz[trackIdx] * t.tz[ti], -1f, 1f);
+            float ang = (float) Math.acos(dot);
+            aim -= look * ang / 8f * 1.6f + ang * 1.2f;
+        }
+        float tgx = t.px[ti] + t.nx(ti) * aim;
+        float tgz = t.pz[ti] + t.nz(ti) * aim;
 
         // avoid boats directly ahead
         for (Boat o : all) {
@@ -132,6 +155,18 @@ final class Boat {
         float dot = t.tx[trackIdx] * t.tx[far] + t.tz[trackIdx] * t.tz[far];
         float corner = clamp((0.75f - dot) * 0.9f, 0f, 0.45f);
         throttle = clamp(1f - corner - Math.max(0f, Math.abs(diff) - 0.35f), 0.25f, 1f);
+        if (paceSpeed >= 0) {
+            // clock start: hold the speed that reaches the start line just after zero
+            throttle = Math.min(throttle, clamp(paceSpeed / Math.max(1f, maxSpeed) + (paceSpeed - spd) * 0.35f, 0f, 1f));
+        }
+    }
+
+    /** Applies an IMPBA power class: speed and acceleration multipliers and throttle lag. */
+    void setPower(float speedMul, float accelMul, float lag) {
+        topSpeed *= speedMul;
+        maxSpeed = topSpeed;
+        accel *= accelMul;
+        throttleLag = lag;
     }
 
     void step(float dt) {
@@ -141,9 +176,11 @@ final class Boat {
 
         float top = maxSpeed * speedMul;
         float drag = accel / (top * top);
+        throttleNow += (throttle - throttleNow) * Math.min(1f, dt / throttleLag);
+        float thr = throttleNow;
         float acc;
-        if (throttle >= 0) acc = throttle * accel;
-        else acc = vf > 0.5f ? throttle * accel * 1.4f : throttle * accel * 0.6f;
+        if (thr >= 0) acc = thr * accel;
+        else acc = vf > 0.5f ? thr * accel * 1.4f : thr * accel * 0.6f;
         vf += acc * dt;
         vf -= drag * vf * Math.abs(vf) * dt;
         vf -= vf * 0.12f * dt;                 // water friction

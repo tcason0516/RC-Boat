@@ -29,10 +29,23 @@ that release. New builds install over the old one.
 - **Boats:** V-Hull (balanced), Hydroplane (fastest, slides in turns),
   Outrigger (grippy, sharpest turning). Opponents race the same type of boat you pick.
 - **Tracks:** Island Loop, Grand Oval, Kidney Bean, Figure Eight, Triangle,
-  Serpentine, Dog Bone, Clover, Speedway, Heart.
-- **Announcer:** a real voice actor counts down "Ready... 3, 2, 1, Go" and calls the
-  race out loud — who's in the lead (you are Player 1), places gained and lost, buoy hits,
-  going off course, and the winner. Voice only; turn it off with *Announcer* in the menu.
+  Serpentine, Dog Bone, Clover, Speedway, Heart, plus the three official IMPBA courses at
+  their real sizes: the **1/3 mile oval** (880 ft around, 35 ft turns), the **1/4 mile oval**
+  (660 ft, 15 ft turns) and the **1/5 mile electric oval** (528.5 ft, 30 ft turns). On these
+  the six numbered orange turn buoys mark the inside of the turns: race counter-clockwise and
+  keep them on your left. A floating digital start clock sits in the infield.
+- **Power:** Electric (instant throttle) or one of the IMPBA Large Scale Gas engine classes:
+  Super Sport (25.5 cc spec engine), LSG27, LSG36 or TLSG64 twin. Bigger engines are faster;
+  gas engines take a moment to rev up and sound like a two-stroke. Opponents use your class.
+- **Start:** *Standing* (3-2-1 from the line), or the IMPBA **clock start**: boats run while
+  the clock counts down and must reach the start line just after zero. *Clock, full* uses the
+  rule book's 2.5 minutes (gas) or 60 seconds (electric); *Clock, short* uses 30 s / 15 s.
+  Crossing the line in the last 5 seconds is a jump start.
+- **Buoy rule:** *Just for fun* (no penalties), *Time penalty* (+3 s) or *Lap penalty*
+  (+1 lap) for each buoy hit, buoy cut (passing inside a turn buoy) or jump start.
+- **Announcer:** calls the race out loud — who's in the lead, places gained and lost, buoy
+  hits, going off course, laps to go and the winner. Voice only; turn it off with
+  *Announcer* in the menu.
 - Menu options also include opponents (0–5), laps, difficulty, controls and sound.
 
 ## Credits

@@ -255,9 +255,12 @@ final class Game {
             // ovals: keep the grid clear of the start / finish buoy on the inside
             if (track.impba) lat = col == 0 ? -track.insideSign * 2.6f : track.insideSign * 0.9f;
             lat *= gk;
+            // inside the racing lanes, so nobody has to swerve into them off the line
+            lat = Math.max(track.laneMin, Math.min(track.laneMax, lat));
             b.placeAt(track, idx, lat);
             b.lapWrap = -1;
             b.progress = -track.length + track.cum[idx];
+            holdLane(b, lat);
         }
         player = withPlayer ? boats[0] : null;
         order = boats.clone();
@@ -423,7 +426,18 @@ final class Game {
             b.lapWrap = -1;
             b.progress = -track.length + track.cum[idx];
             b.lastCrossClock = -1;
+            holdLane(b, lat);
         }
+    }
+
+    /**
+     * AI boats start in the lane they were placed in and hold it for a few seconds, so
+     * they don't swerve across the grid at the start.
+     */
+    private void holdLane(Boat b, float lat) {
+        float l = Math.max(track.laneMin, Math.min(track.laneMax, lat));
+        b.lane = b.laneTarget = l;
+        b.laneTimer = 4f + rnd.nextFloat() * 3f;
     }
 
     /**

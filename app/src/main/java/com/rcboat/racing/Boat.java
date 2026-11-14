@@ -183,14 +183,26 @@ final class Boat {
         float tgx = t.px[ti] + t.nx(ti) * aim;
         float tgz = t.pz[ti] + t.nz(ti) * aim;
 
-        // avoid boats directly ahead
+        // avoid boats directly ahead that we're catching (not ones pulling away, and not
+        // the boat in front on the starting grid until we're closing on it)
+        float myLat = (x - t.px[trackIdx]) * t.nx(trackIdx) + (z - t.pz[trackIdx]) * t.nz(trackIdx);
+        float latRight = rightX() * t.nx(trackIdx) + rightZ() * t.nz(trackIdx);   // + if "right" is +lateral
         for (Boat o : all) {
             if (o == this) continue;
             float dx = o.x - x, dz = o.z - z;
             float fwd = dx * fwdX() + dz * fwdZ();
             float side = dx * rightX() + dz * rightZ();
-            if (fwd > 0 && fwd < 7f * fx && Math.abs(side) < 1.6f * fx) {
-                float push = (side >= 0 ? -1f : 1f) * 2.2f * fx;
+            float closing = (vx - o.vx) * fwdX() + (vz - o.vz) * fwdZ();
+            if (fwd > 0 && fwd < 7f * fx && Math.abs(side) < 1.6f * fx
+                    && closing > 0.3f * fx && fwd < closing * 1.8f + 1.5f * fx) {
+                float dir;
+                if (Math.abs(side) > 0.35f * fx) dir = side > 0 ? -1f : 1f;
+                else {
+                    // dead ahead: pass on the side with more room in the lane
+                    float toward = myLat > (t.laneMin + t.laneMax) * 0.5f ? -1f : 1f;
+                    dir = toward * (latRight >= 0 ? 1f : -1f);
+                }
+                float push = dir * 2.2f * fx;
                 tgx += rightX() * push;
                 tgz += rightZ() * push;
             }

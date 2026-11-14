@@ -131,6 +131,8 @@ final class Game {
     String message = "";
     float messageTime;
     final Particles particles = new Particles(700);
+    /** Rooster tails: water thrown up behind the props. */
+    final Spray spray = new Spray(1400);
     float[] buoyWobble;
 
     // ---- input (written by the UI thread) ----
@@ -250,6 +252,7 @@ final class Game {
         player = withPlayer ? boats[0] : null;
         order = boats.clone();
         particles.clear();
+        spray.clear();
     }
 
     /**
@@ -334,8 +337,14 @@ final class Game {
         if (clockStart) spreadForClock();
         else if (startMode == START_LE_MANS && event != EVENT_SPEED) lineUpLeMans();
         announcer.reset();
+        // the opening line plays in full before the countdown starts (skipped on a clock
+        // too short for it, like the 5 s Enduro clock)
+        announcer.enabled = announcerOn && soundOn;
+        boolean opened = (!clockStart || countdown > 10f)
+                && announcer.say("start", 5, "start", 0f, Announcer.IMPORTANT);
+        if (opened && !clockStart) countdown = Math.max(4.8f, 3f + announcer.remaining() + 0.3f);
         evBuoy = evShore = evBump = false;
-        annStartDelay = 0.15f;
+        annStartDelay = 0f;
         annFinishDelay = 0;
         annLeader = -1;
         annPrevPos = -1;
@@ -481,14 +490,14 @@ final class Game {
                     setMessage("GO!", 1.0f);
                     announcer.enabled = announcerOn;
                     // the clock's "Race! Race! Race!" call, or the standing start's "Go!"
-                    if (!(clockStart && announcer.say("race", 0, "count", 0f, Announcer.URGENT)))
-                        announcer.say("go", 2, "count", 0f, Announcer.URGENT);
+                    if (!(clockStart && announcer.say("race", 0, "count", 0f, Announcer.CUT)))
+                        announcer.say("go", 2, "count", 0f, Announcer.CUT);
                     // after the start call, so a jump-start call queues behind it
                     if (clockStart) startFromClock();
                 } else if (after != before && after <= 3) {
                     if (!voice) beepRequest = 520;
                     announcer.enabled = announcerOn;
-                    announcer.say("count_" + after, 0, "count", 0f, Announcer.URGENT);
+                    announcer.say("count_" + after, 0, "count", 0f, Announcer.CUT);
                 }
                 if (!clockStart) for (Boat b : boats) { b.throttle = 0; b.steer = 0; }
                 break;
@@ -547,6 +556,7 @@ final class Game {
             emitWake(b, dt);
         }
         particles.update(dt);
+        spray.update(dt);
         rank();
     }
 
@@ -719,6 +729,7 @@ final class Game {
 
     private void emitWake(Boat b, float dt) {
         float spd = b.speed();
+        roosterTail(b, dt, spd);
         if (spd < 1.2f) return;
         b.wakeTimer -= dt;
         if (b.wakeTimer > 0) return;
@@ -740,6 +751,35 @@ final class Game {
         }
     }
 
+    /**
+     * The rooster tail: the propeller throws a plume of water up behind the transom. It
+     * grows with speed and throttle; surface-piercing props on hydros and outriggers throw
+     * the tallest tails.
+     */
+    private void roosterTail(Boat b, float dt, float spd) {
+        float fwdSpd = b.forwardSpeed();
+        if (fwdSpd < 4f) { b.sprayTimer = 0; return; }
+        float k = Boat.clamp((fwdSpd - 4f) / 9f, 0f, 1.3f) * (0.55f + 0.45f * Math.max(0f, b.throttleNow));
+        float hullK = b.hull == Boat.HYDROPLANE || b.hull == Boat.OUTRIGGER ? 1.2f
+                : b.hull == Boat.CATAMARAN ? 1.0f : 0.85f;
+        b.sprayTimer += dt * (70f + 110f * k);   // clumps per second
+        float fx = b.fwdX(), fz = b.fwdZ(), rx = b.rightX(), rz = b.rightZ();
+        float sc = b.sizeScale;
+        float sx = b.x - fx * 0.66f * sc, sz = b.z - fz * 0.66f * sc;
+        while (b.sprayTimer >= 1f) {
+            b.sprayTimer -= 1f;
+            float side = (rnd.nextFloat() - 0.5f) * 2f;
+            float up = (1.3f + 2.8f * k) * hullK * (0.75f + 0.5f * rnd.nextFloat()) * (float) Math.sqrt(sc);
+            // the prop throws water back at most of the boat's speed, so the plume hangs
+            // in a short, narrow fan behind the transom as the boat runs away from it
+            float back = fwdSpd * (0.55f + 0.2f * rnd.nextFloat());
+            float vx = b.vx - fx * back + rx * side * 0.45f;
+            float vz = b.vz - fz * back + rz * side * 0.45f;
+            spray.emit(sx + rx * side * 0.03f, b.y + 0.04f, sz + rz * side * 0.03f, vx, up, vz,
+                    0.32f + 0.4f * k, 0.06f + 0.03f * k, 0.2f + 0.24f * k * hullK, 0.2f + 0.18f * k);
+        }
+    }
+
     // ------------------------------------------------------------------ announcers
 
     /** Decides what the broadcast booth says about what just happened. */
@@ -751,7 +791,7 @@ final class Game {
 
         if (annStartDelay > 0) {
             annStartDelay -= dt;
-            if (annStartDelay <= 0) a.say("start", 5, "start", 0f, Announcer.URGENT);
+            if (annStartDelay <= 0) a.say("start", 5, "start", 0f, Announcer.IMPORTANT);
         }
         if (state == State.COUNTDOWN) return;
 

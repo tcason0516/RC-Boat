@@ -44,6 +44,7 @@ final class Boat {
     // visuals
     float pitch, roll, y;
     float wakeTimer;
+    float sprayTimer;
     float bobPhase;
 
     // AI

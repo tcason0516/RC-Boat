@@ -418,8 +418,11 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private boolean showMarker;
     private float time;
     private float[] wobble = new float[0];
-    private final FloatBuffer partBuf, shadowBuf;
-    private int partVerts, shadowVerts;
+    private final FloatBuffer partBuf, shadowBuf, sprayBuf;
+    private int partVerts, shadowVerts, sprayVerts;
+    /** Snapshot of the spray: x, y, z, size, alpha per clump. */
+    private final float[] sprayData;
+    private int sprayCount;
 
     GameRenderer(android.content.Context context, Game game) {
         this.context = context.getApplicationContext();
@@ -428,6 +431,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
         shadowBuf = ByteBuffer.allocateDirect((Game.COLORS.length + 200) * 6 * 6 * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        sprayBuf = ByteBuffer.allocateDirect(game.spray.max * 6 * 6 * 4)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        sprayData = new float[game.spray.max * 5];
     }
 
     @Override
@@ -699,6 +705,17 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             if (wobble.length != game.buoyWobble.length) wobble = new float[game.buoyWobble.length];
             System.arraycopy(game.buoyWobble, 0, wobble, 0, wobble.length);
             fillParticles(game.particles);
+            Spray sp = game.spray;
+            int n = 0;
+            for (int i = 0; i < sp.count; i++) {
+                float a = sp.alphaOf(i);
+                if (a < 0.01f) continue;
+                int o = n * 5;
+                sprayData[o] = sp.x[i]; sprayData[o + 1] = sp.y[i]; sprayData[o + 2] = sp.z[i];
+                sprayData[o + 3] = sp.sizeOf(i); sprayData[o + 4] = a;
+                n++;
+            }
+            sprayCount = n;
         }
         if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
         if (track.impba && kits[track.id] == null) kits[track.id] = Scenery.buildCourseKit(track);
@@ -728,6 +745,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         drawWater();
         drawFlat(shadowBuf, shadowVerts, 0.0f, 0.03f, 0.05f, 0f);
         drawFlat(partBuf, partVerts, 0.94f, 0.97f, 1.0f, 1f);
+        fillSpray();
+        drawFlat(sprayBuf, sprayVerts, 0.93f, 0.96f, 1.0f, 0.55f);
         GLES20.glDepthMask(true);
         GLES20.glDisable(GLES20.GL_BLEND);
     }
@@ -941,6 +960,27 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(lPos);
         GLES20.glDisableVertexAttribArray(lNormal);
         GLES20.glDisableVertexAttribArray(lColor);
+    }
+
+    /** Rooster-tail clumps as camera-facing quads (built from the view matrix's axes). */
+    private void fillSpray() {
+        float rxv = view[0], ryv = view[4], rzv = view[8];   // camera right
+        float uxv = view[1], uyv = view[5], uzv = view[9];   // camera up
+        sprayBuf.position(0);
+        int v = 0;
+        float[][] c = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+        for (int i = 0; i < sprayCount; i++) {
+            int o = i * 5;
+            float x = sprayData[o], y = sprayData[o + 1], z = sprayData[o + 2], s = sprayData[o + 3],
+                    a = sprayData[o + 4];
+            for (float[] k : c) {
+                sprayBuf.put(x + (rxv * k[0] + uxv * k[1]) * s).put(y + (ryv * k[0] + uyv * k[1]) * s)
+                        .put(z + (rzv * k[0] + uzv * k[1]) * s).put(k[0]).put(k[1]).put(a);
+            }
+            v += 6;
+        }
+        sprayVerts = v;
+        sprayBuf.position(0);
     }
 
     private void fillParticles(Particles p) {

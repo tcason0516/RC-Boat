@@ -11,10 +11,12 @@ final class Announcer {
     /** How a line competes with what is already being said. */
     static final int NORMAL = 0;     // dropped if the booth is busy
     static final int IMPORTANT = 1;  // waits a few seconds for a gap
-    static final int URGENT = 2;     // cuts in immediately
+    static final int URGENT = 2;     // goes next, as soon as the current line ends
+    static final int CUT = 3;        // the start signal and countdown: cuts in on the beat
 
-    private static final float GAP = 0.7f;          // breather between lines
+    private static final float GAP = 0.5f;          // breather between lines
     private static final float PENDING_LIFE = 4f;   // how long an IMPORTANT line may wait
+    private static final float URGENT_LIFE = 9f;    // how long an URGENT line may wait
     private static final float SAME_CLIP_GAP = 15f; // the same clip is not repeated sooner
 
     private final Random rnd = new Random();
@@ -31,29 +33,34 @@ final class Announcer {
     private float clock;
     private float busyUntil;
     private float lastSpoke;
-    private String pending;
-    private float pendingUntil;
+    /** Lines waiting for a gap: key, group, level, expiry. At most one per group. */
+    private final java.util.ArrayList<Object[]> queue = new java.util.ArrayList<>();
 
     void reset() {
         clock = 0;
         busyUntil = 0;
         lastSpoke = 0;
-        pending = null;
+        queue.clear();
         lastSaid.clear();
         lastClipAt.clear();
     }
 
     void tick(float dt) {
         clock += dt;
-        if (pending != null) {
-            if (clock > pendingUntil) pending = null;
-            else if (clock >= busyUntil) {
-                String key = pending;
-                pending = null;
-                play(key);
-            }
-        }
+        for (int i = queue.size() - 1; i >= 0; i--) if (clock > (float) queue.get(i)[3]) queue.remove(i);
+        if (clock < busyUntil || queue.isEmpty()) return;
+        // the most important waiting line goes first; among equals, the oldest
+        Object[] best = queue.get(0);
+        for (Object[] q : queue) if ((int) q[2] > (int) best[2]) best = q;
+        queue.remove(best);
+        play((String) best[0]);
     }
+
+    /** Whether the booth is talking right now. */
+    boolean busy() { return clock < busyUntil; }
+
+    /** Seconds the current line still has to run. */
+    float remaining() { return Math.max(0f, busyUntil - clock); }
 
     /** Seconds since the booth last started a line. */
     float quietFor() { return clock - lastSpoke; }
@@ -66,23 +73,23 @@ final class Announcer {
     boolean say(String base, int variants, String group, float minGap, int level) {
         if (!enabled) return false;
         Float last = lastSaid.get(group);
-        if (level != URGENT && last != null && clock - last < minGap) return false;
+        if (level < URGENT && last != null && clock - last < minGap) return false;
         String key = base;
         if (variants > 0) {
             key = base + "_" + nextVariant(base, variants);
         }
         if (!AnnouncerClips.DURATION.containsKey(key)) return false;
         Float lastClip = lastClipAt.get(key);
-        if (level != URGENT && lastClip != null && clock - lastClip < SAME_CLIP_GAP) return false;
-        if (level == URGENT || clock >= busyUntil) {
+        if (level < URGENT && lastClip != null && clock - lastClip < SAME_CLIP_GAP) return false;
+        if (level == CUT || (clock >= busyUntil && queue.isEmpty())) {
             lastSaid.put(group, clock);
             play(key);
             return true;
         }
-        if (level == IMPORTANT) {
+        if (level >= IMPORTANT) {
             lastSaid.put(group, clock);
-            pending = key;
-            pendingUntil = clock + PENDING_LIFE;
+            for (int i = queue.size() - 1; i >= 0; i--) if (queue.get(i)[1].equals(group)) queue.remove(i);
+            queue.add(new Object[]{key, group, level, clock + (level == URGENT ? URGENT_LIFE : PENDING_LIFE)});
             return true;
         }
         return false;

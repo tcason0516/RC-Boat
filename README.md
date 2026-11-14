@@ -89,6 +89,9 @@ Announcer voice: generated with the [Maya1](https://huggingface.co/maya-research
 model (Apache 2.0) and the [SNAC](https://github.com/hubertsiuzdak/snac) audio codec (MIT).
 See `tools/announcer/README.md`.
 
+Driver's arms and hands (life-size cockpit): the [MakeHuman](http://www.makehumancommunity.org)
+base mesh, skeleton and skin weights (CC0), posed on the wheel by `tools/arms/build_arms.py`.
+
 ## Building yourself
 
 Requires JDK 17 and the Android SDK (API 34).

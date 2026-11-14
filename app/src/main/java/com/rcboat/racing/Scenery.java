@@ -20,9 +20,7 @@ final class Scenery {
 
     /** Life-size boats: [color] hull and a shared canopy; the cockpit for the driver's view. */
     Mesh[] lifeHulls;
-    Mesh lifeCanopy, cockpit, wheel, unitBox, glove, gloveL, gloveR, limb, joint;
-    /** Driver's sleeves in each team colour: [color][0 upper arm, 1 forearm, 2 elbow]. */
-    Mesh[][] sleeves;
+    Mesh lifeCanopy, cockpit, wheel, unitBox;
     final boolean life;
     /** The driver's eyes in the life-size boat (boat coordinates, forward = -z). */
     static final float[] EYE = Boat.LIFE_EYE;
@@ -31,10 +29,9 @@ final class Scenery {
     static final float WHEEL_TILT = 62f, WHEEL_R = 0.165f;
     /** Rim tube radius (the leather grip). */
     static final float RIM_T = 0.019f;
-    /** Shoulders of the driver (boat coordinates): below and just behind the eyes. */
-    static final float[] SHOULDER_L = {-0.24f, 1.2f, -1.98f}, SHOULDER_R = {0.24f, 1.2f, -1.98f};
-    /** Where the forearm meets the glove, in the glove's own frame. */
-    static final float[] WRIST = {0.085f, 0f, 0.07f};
+    /* The driver's arms are baked by tools/arms/build_arms.py (assets/arms.bin, see Arms);
+       its cockpit constants (wheel, rim, shoulders at x = +-0.2, y = 1.15, z = -1.9) must
+       match the ones above. */
 
     Scenery(Game game) { this(game, false); }
 
@@ -177,24 +174,6 @@ final class Scenery {
         cockpit = buildCockpit();
         wheel = buildWheel();
         unitBox = buildSegment2();
-        gloveL = buildGlove(-1);
-        gloveR = buildGlove(1);
-        glove = gloveR;
-        MeshBuilder lb = new MeshBuilder();
-        lb.cylinder(0, -0.5f, 0, 0.5f, 0.5f, 1f, 16, 1f, 1f, 1f, true);   // tinted when drawn
-        limb = lb.build();
-        MeshBuilder jb = new MeshBuilder();
-        jb.sphere(0, 0, 0, 1f, 1f, 1f, 14, 8, 1f, 1f, 1f);
-        joint = jb.build();
-        sleeves = new Mesh[Game.COLORS.length][];
-        for (int i = 0; i < Game.COLORS.length; i++) {
-            float[] c = Game.COLORS[i];
-            float[] suit = {c[0] * 0.78f, c[1] * 0.78f, c[2] * 0.78f};
-            sleeves[i] = new Mesh[]{
-                    buildSleeve(suit, new float[]{1.0f, 1.06f, 1.04f, 0.96f, 0.88f, 0.84f}, false),
-                    buildSleeve(suit, new float[]{0.9f, 1.02f, 1.0f, 0.9f, 0.78f, 0.7f, 0.68f}, true),
-                    buildElbow(suit)};
-        }
     }
 
     /** Grandstand, judges' tower, pit tents and a crane on the shore by the start line. */
@@ -477,116 +456,6 @@ final class Scenery {
         }
         // steering column into the dash
         tube(mb, new float[][]{{0, 0, -0.01f}, {0, 0, -0.32f}}, 0.024f, false, 12, metal);
-        return mb.build();
-    }
-
-    /**
-     * A fire-suit sleeve: a lathe along +y from -0.5 (shoulder / elbow) to +0.5, radius 0.5
-     * scaled by the profile (muscle shape). A white racing stripe runs down the outside
-     * (angle 0) with black piping; the forearm ends in a white knitted cuff with a seam.
-     */
-    private static Mesh buildSleeve(float[] suit, float[] profile, boolean cuff) {
-        MeshBuilder mb = new MeshBuilder();
-        int rings = 24, sides = 20;
-        float[] white = {0.95f, 0.95f, 0.94f}, piping = {0.05f, 0.05f, 0.06f};
-        float[][][] P = new float[rings + 1][sides][];
-        float[][][] N = new float[rings + 1][sides][];
-        float[][][] C = new float[rings + 1][sides][];
-        for (int j = 0; j <= rings; j++) {
-            float t = (float) j / rings;
-            float fp = t * (profile.length - 1);
-            int k = Math.min(profile.length - 2, (int) fp);
-            float f = fp - k;
-            f = f * f * (3 - 2 * f);
-            float r = 0.5f * (profile[k] + (profile[k + 1] - profile[k]) * f);
-            // fabric folds: a few soft wrinkles round the sleeve
-            float y = t - 0.5f;
-            boolean cuffBand = cuff && t > 0.86f;
-            for (int i = 0; i < sides; i++) {
-                double a = 2 * Math.PI * i / sides;
-                float wr = r * (1f + 0.025f * (float) Math.sin(t * 19 + Math.sin(a * 3) * 2));
-                if (cuffBand) wr = r * (1.04f + 0.03f * (float) Math.sin(a * 10));   // knitted ribs
-                float cx = (float) Math.cos(a), cz = (float) Math.sin(a);
-                P[j][i] = new float[]{cx * wr, y, cz * wr};
-                N[j][i] = new float[]{cx, 0, cz};
-                // the stripe runs along the top of the arm (+z of the lathe), where the
-                // driver sees it
-                float ang = (float) Math.abs(Math.atan2(cz, cx) - Math.PI / 2);
-                float[] col = suit;
-                if (cuffBand) col = white;
-                else if (ang < 0.22f) col = white;
-                else if (ang < 0.3f) col = piping;
-                if (cuff && t > 0.84f && t <= 0.86f) col = piping;   // cuff seam
-                C[j][i] = col;
-            }
-        }
-        for (int j = 0; j < rings; j++) {
-            for (int i = 0; i < sides; i++) {
-                int i2 = (i + 1) % sides;
-                vtx(mb, P[j][i], N[j][i], C[j][i]); vtx(mb, P[j + 1][i], N[j + 1][i], C[j][i]); vtx(mb, P[j + 1][i2], N[j + 1][i2], C[j][i]);
-                vtx(mb, P[j][i], N[j][i], C[j][i]); vtx(mb, P[j + 1][i2], N[j + 1][i2], C[j][i]); vtx(mb, P[j][i2], N[j][i2], C[j][i]);
-            }
-        }
-        return mb.build();
-    }
-
-    /** The elbow: a rounded joint in suit colour with a padded patch. */
-    private static Mesh buildElbow(float[] suit) {
-        MeshBuilder mb = new MeshBuilder();
-        mb.sphere(0, 0, 0, 1f, 1f, 1f, 18, 10, suit[0], suit[1], suit[2]);
-        mb.sphere(0.35f, 0, 0, 0.75f, 0.75f, 0.75f, 14, 8, suit[0] * 0.8f, suit[1] * 0.8f, suit[2] * 0.8f);
-        return mb.build();
-    }
-
-    /**
-     * A racing glove gripping the rim, in the hand's frame: x points out from the wheel
-     * centre, y along the rim (side = the way the thumb points), z towards the driver.
-     * From the seat you see the back of the hand with its knuckle pads, the fingers wrapped
-     * round the far side of the rim with their tips curling back on the inside, the thumb
-     * along the front of the rim, and the gauntlet with its strap.
-     */
-    private static Mesh buildGlove(int side) {
-        MeshBuilder mb = new MeshBuilder();
-        float[] g = {0.085f, 0.085f, 0.095f}, pad = {0.32f, 0.33f, 0.36f}, seam = {0.03f, 0.03f, 0.035f};
-        float[] strap = {0.78f, 0.1f, 0.07f}, logo = {0.92f, 0.92f, 0.9f};
-        float t = RIM_T * 1.18f;
-        // back of the hand, cupped round the outside of the rim, facing the driver
-        mb.sphere(t + 0.016f, -0.004f * side, 0.014f, 0.024f, 0.047f, 0.036f, 20, 10, g[0], g[1], g[2]);
-        mb.sphere(t + 0.026f, -0.004f * side, 0.026f, 0.014f, 0.03f, 0.016f, 14, 6, pad[0], pad[1], pad[2]);
-        mb.box(t + 0.03f, 0.006f * side, 0.03f, 0.004f, 0.02f, 0.012f, 0, logo[0], logo[1], logo[2]);
-        // palm against the far side of the rim
-        mb.sphere(0.006f, -0.004f * side, -t - 0.006f, 0.03f, 0.045f, 0.016f, 16, 8, g[0], g[1], g[2]);
-        // four fingers: from the knuckles over the far side, tips curling back on the inside
-        float[] fy = {-0.032f, -0.011f, 0.011f, 0.031f};
-        float[] reach = {200f, 225f, 220f, 195f};
-        for (int f = 0; f < 4; f++) {
-            float y = fy[f] * side;
-            float rr = t + 0.0095f;
-            int n = 12;
-            float[][] p = new float[n][];
-            for (int i = 0; i < n; i++) {
-                double a = Math.toRadians(-5 - reach[f] * i / (n - 1));
-                p[i] = new float[]{rr * (float) Math.cos(a), y, rr * (float) Math.sin(a)};
-            }
-            tube(mb, p, 0.0094f - f * 0.0004f, false, 12, g);
-            // a stitched seam along the top of the finger
-            float[][] sp = new float[n - 2][];
-            for (int i = 1; i < n - 1; i++) sp[i - 1] = new float[]{p[i][0] * 1.06f, y, p[i][2] * 1.06f};
-            tube(mb, sp, 0.0016f, false, 4, seam);
-            // knuckle pad and the joints of the finger
-            mb.sphere(p[0][0] + 0.004f, y, p[0][2] + 0.004f, 0.009f, 0.0095f, 0.009f, 10, 5, pad[0], pad[1], pad[2]);
-            mb.sphere(p[n - 1][0], y, p[n - 1][2], 0.0092f, 0.0092f, 0.0092f, 10, 5, g[0], g[1], g[2]);
-        }
-        // thumb across the front of the rim towards twelve o'clock
-        tube(mb, new float[][]{{t + 0.012f, 0.03f * side, 0.026f}, {0.008f, 0.05f * side, t + 0.012f},
-                {-0.012f, 0.062f * side, t + 0.006f}, {-0.026f, 0.066f * side, t * 0.4f}}, 0.0105f, false, 10, g);
-        mb.sphere(-0.026f, 0.066f * side, t * 0.4f, 0.0105f, 0.0105f, 0.0105f, 10, 5, g[0], g[1], g[2]);
-        // gauntlet up to the wrist, with a red strap
-        tube(mb, new float[][]{{t + 0.02f, 0f, 0.028f}, {WRIST[0] * 0.8f, 0f, WRIST[2] * 0.8f},
-                {WRIST[0], WRIST[1], WRIST[2]}}, 0.026f, false, 16, g);
-        float[] a = {t + 0.02f + (WRIST[0] - t - 0.02f) * 0.6f, 0f, 0.028f + (WRIST[2] - 0.028f) * 0.6f};
-        float[] b = {t + 0.02f + (WRIST[0] - t - 0.02f) * 0.72f, 0f, 0.028f + (WRIST[2] - 0.028f) * 0.72f};
-        tube(mb, new float[][]{a, b}, 0.0285f, false, 16, strap);
         return mb.build();
     }
 

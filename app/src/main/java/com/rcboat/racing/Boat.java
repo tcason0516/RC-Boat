@@ -101,6 +101,12 @@ final class Boat {
     float sizeScale = 1f;
     /** Collision radius (m). */
     float radius = RADIUS;
+    /**
+     * Long hulls collide as a row of three circles of radius hullR along the hull (centres
+     * bodyOff ahead of and behind the middle), so the bow and stern can't be passed
+     * through; 0 = a single circle of radius.
+     */
+    float bodyOff = 0f, hullR;
     /** Scale of wakes, spray and spacing: 1 for RC boats, ~7.5 for the life-size boat. */
     float fx = 1f;
     /** Banking into turns. */
@@ -123,6 +129,8 @@ final class Boat {
         this.maxSpeed = topSpeed;
         if (hull == UNLIMITED) {
             radius = 3.0f;
+            bodyOff = 2.6f;   // the hull runs 4.75 m ahead to 4.6 m behind the middle, 4.8 m wide
+            hullR = 2.25f;
             fx = 7.5f;
             rollK = 0.0035f;
             waterDrag = 0.012f;
@@ -136,6 +144,12 @@ final class Boat {
         this.isPlayer = isPlayer;
         this.bobPhase = rnd.nextFloat() * 6.28f;
     }
+
+    /** Collision circles: how many, their centres (k = 0 .. count-1) and radius. */
+    int circles() { return bodyOff > 0 ? 3 : 1; }
+    float circleX(int k) { return bodyOff > 0 ? x + fwdX() * bodyOff * (k - 1) : x; }
+    float circleZ(int k) { return bodyOff > 0 ? z + fwdZ() * bodyOff * (k - 1) : z; }
+    float circleR() { return bodyOff > 0 ? hullR : radius; }
 
     float fwdX() { return (float) -Math.sin(heading); }
     float fwdZ() { return (float) -Math.cos(heading); }

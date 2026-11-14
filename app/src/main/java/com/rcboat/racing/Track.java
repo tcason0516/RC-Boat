@@ -125,7 +125,7 @@ final class Track {
         } else if (offshore) {
             buildOffshore(id);
         } else {
-            build(controlPoints(id));
+            build(clockwise(controlPoints(id)));
             chooseStart();
             placeBuoys();
         }
@@ -194,6 +194,22 @@ final class Track {
                         {13, -24}, {5, -15}, {-5, -15}, {-13, -24}, {-26, -29}, {-41, -23}, {-50, -7},
                         {-46, 10}, {-32, 22}, {-16, 29}};
         }
+    }
+
+    /**
+     * Every course is raced clockwise (right turns, as on the IMPBA courses): a layout drawn
+     * the other way round is reversed. (The figure eight turns both ways by design.)
+     */
+    static float[][] clockwise(float[][] p) {
+        double area = 0;
+        for (int i = 0; i < p.length; i++) {
+            float[] a = p[i], b = p[(i + 1) % p.length];
+            area += a[0] * b[1] - b[0] * a[1];
+        }
+        if (area >= 0) return p;
+        float[][] r = new float[p.length][];
+        for (int i = 0; i < p.length; i++) r[i] = p[p.length - 1 - i];
+        return r;
     }
 
     private static float[][] ellipse(float a, float b, int n) {

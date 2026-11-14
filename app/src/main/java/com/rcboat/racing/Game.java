@@ -635,13 +635,20 @@ final class Game {
             Boat a = boats[i];
             for (int j = i + 1; j < boats.length; j++) {
                 Boat c = boats[j];
-                float dx = c.x - a.x, dz = c.z - a.z;
-                float d2 = dx * dx + dz * dz;
-                float min = a.radius + c.radius;
-                if (d2 < min * min && d2 > 1e-6f) {
-                    float d = (float) Math.sqrt(d2);
-                    float nx = dx / d, nz = dz / d;
-                    float push = (min - d) * 0.5f;
+                // the deepest overlap between the two hulls' collision circles
+                float best = 0f, nx = 0f, nz = 0f;
+                float min = a.circleR() + c.circleR();
+                for (int ka = 0; ka < a.circles(); ka++) {
+                    for (int kc = 0; kc < c.circles(); kc++) {
+                        float dx = c.circleX(kc) - a.circleX(ka), dz = c.circleZ(kc) - a.circleZ(ka);
+                        float d2 = dx * dx + dz * dz;
+                        if (d2 >= min * min || d2 < 1e-6f) continue;
+                        float d = (float) Math.sqrt(d2);
+                        if (min - d > best) { best = min - d; nx = dx / d; nz = dz / d; }
+                    }
+                }
+                if (best > 0f) {
+                    float push = best * 0.5f;
                     a.x -= nx * push; a.z -= nz * push;
                     c.x += nx * push; c.z += nz * push;
                     float rel = (c.vx - a.vx) * nx + (c.vz - a.vz) * nz;
@@ -656,16 +663,18 @@ final class Game {
         }
         // boat vs buoys
         for (Boat b : boats) {
-            float min = b.radius + track.buoyRadius;
+            float min = b.circleR() + track.buoyRadius;
             for (int k = 0; k < track.buoys.size(); k++) {
                 float[] bu = track.buoys.get(k);
-                float dx = b.x - bu[0], dz = b.z - bu[1];
-                float d2 = dx * dx + dz * dz;
-                if (d2 < min * min && d2 > 1e-6f) {
+                for (int kb = 0; kb < b.circles(); kb++) {
+                    float cx = b.circleX(kb), cz = b.circleZ(kb);
+                    float dx = cx - bu[0], dz = cz - bu[1];
+                    float d2 = dx * dx + dz * dz;
+                    if (d2 >= min * min || d2 < 1e-6f) continue;
                     float d = (float) Math.sqrt(d2);
                     float nx = dx / d, nz = dz / d;
-                    b.x = bu[0] + nx * min;
-                    b.z = bu[1] + nz * min;
+                    b.x += nx * (min - d);
+                    b.z += nz * (min - d);
                     float vn = b.vx * nx + b.vz * nz;
                     if (vn < 0) {
                         b.vx -= nx * vn * 1.4f;
@@ -1051,7 +1060,8 @@ final class Game {
 
     /** Record key: event, course, laps, class, engine and hull. */
     String recordKey(String kind) {
-        String course = kind.equals("speed") ? "s" : trackId + (radiusBuoys && track.oval ? "r" : "");
+        String course = kind.equals("speed") ? "s" : trackId + (radiusBuoys && track.oval ? "r" : "")
+                + (track.impba ? "" : "cw");   // the RC layouts now run clockwise: new records
         String len = kind.equals("race") ? "|" + (timed() ? "t" : String.valueOf(laps)) : "";
         return kind + "|" + course + len + "|" + raceClass + "|" + power + "|" + hull;
     }

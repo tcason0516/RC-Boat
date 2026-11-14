@@ -15,9 +15,14 @@ final class AnnouncerClips {
         DURATION.put("buoy_0", 1.75f);
         DURATION.put("buoy_1", 1.87f);
         DURATION.put("buoy_2", 1.98f);
+        DURATION.put("clock_10", 1.97f);
+        DURATION.put("clock_120", 1.54f);
+        DURATION.put("clock_30", 1.11f);
+        DURATION.put("clock_60", 0.63f);
         DURATION.put("count_1", 0.91f);
         DURATION.put("count_2", 0.72f);
         DURATION.put("count_3", 0.71f);
+        DURATION.put("cut", 3.16f);
         DURATION.put("down_0", 1.87f);
         DURATION.put("down_1", 1.89f);
         DURATION.put("down_2", 3.62f);
@@ -33,6 +38,7 @@ final class AnnouncerClips {
         DURATION.put("front_3", 3.83f);
         DURATION.put("go_0", 1.89f);
         DURATION.put("go_1", 4.95f);
+        DURATION.put("jump", 3.52f);
         DURATION.put("last_0", 3.66f);
         DURATION.put("last_1", 2.86f);
         DURATION.put("last_2", 3.20f);
@@ -59,6 +65,7 @@ final class AnnouncerClips {
         DURATION.put("off_0", 1.66f);
         DURATION.put("off_1", 2.50f);
         DURATION.put("off_2", 3.25f);
+        DURATION.put("race", 2.52f);
         DURATION.put("start_0", 3.65f);
         DURATION.put("start_1", 5.08f);
         DURATION.put("start_2", 4.03f);

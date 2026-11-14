@@ -376,7 +376,6 @@ final class Game {
                     clockCalls();
                 }
                 if (countdown <= 0) {
-                    if (clockStart) startFromClock();
                     state = State.RACING;
                     if (!voice) beepRequest = 1040;
                     setMessage("GO!", 1.0f);
@@ -384,6 +383,8 @@ final class Game {
                     // the clock's "Race! Race! Race!" call, or the standing start's "Go!"
                     if (!(clockStart && announcer.say("race", 0, "count", 0f, Announcer.URGENT)))
                         announcer.say("go", 2, "count", 0f, Announcer.URGENT);
+                    // after the start call, so a jump-start call queues behind it
+                    if (clockStart) startFromClock();
                 } else if (after != before && after <= 3) {
                     if (!voice) beepRequest = 520;
                     announcer.enabled = announcerOn;

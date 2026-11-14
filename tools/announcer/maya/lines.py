@@ -94,6 +94,15 @@ LINES = {
     "fin_5": "Fifth place finish.",
     "fin_6": "You finish sixth. Better luck next time.",
     "fin_last": "Last place! But hey, you looked great doing it!",
+
+    # clock start (IMPBA): time calls, the start, and penalties
+    "clock_120": "Two minutes on the clock!",
+    "clock_60": "One minute!",
+    "clock_30": "Thirty seconds!",
+    "clock_10": X + "Ten seconds, line 'em up!",
+    "race": X + "Race! Race! Race!",
+    "cut": "You cut the buoy! That's a penalty!",
+    "jump": X + "Jumped the start! Penalty!",
 }
 
 for i, n in OPP.items():

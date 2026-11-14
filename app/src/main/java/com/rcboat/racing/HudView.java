@@ -153,8 +153,8 @@ final class HudView extends View {
                 () -> { g.raceClass = (g.raceClass + nC - 1) % nC; g.enforceRules(); },
                 () -> { g.raceClass = (g.raceClass + 1) % nC; g.enforceRules(); });
         row(c, x1, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
-                () -> g.hull = RaceClass.step(g.hull, -1, nH, h -> RaceClass.hullOk(g.raceClass, h)),
-                () -> g.hull = RaceClass.step(g.hull, 1, nH, h -> RaceClass.hullOk(g.raceClass, h)));
+                () -> g.hull = RaceClass.step(g.hull, -1, nH, hh -> RaceClass.hullOk(g.raceClass, hh)),
+                () -> g.hull = RaceClass.step(g.hull, 1, nH, hh -> RaceClass.hullOk(g.raceClass, hh)));
         row(c, x1, y0 + 2 * rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
                 () -> { g.power = RaceClass.step(g.power, -1, nP, q -> RaceClass.powerOk(g.raceClass, q)); g.enforceRules(); },
                 () -> { g.power = RaceClass.step(g.power, 1, nP, q -> RaceClass.powerOk(g.raceClass, q)); g.enforceRules(); });

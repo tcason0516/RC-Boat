@@ -209,6 +209,7 @@ final class HudView extends View {
 
     /** Track name short enough for the menu's value box. */
     private static String shortTrack(Track t) {
+        if (t.offshore) return t.name.replace(" Course", "");
         return t.impba ? t.name.replace("IMPBA ", "").replace(" Mile", " mi").replace(" Electric", " mi elec.")
                 .replace(" mi mi", " mi") : t.name;
     }

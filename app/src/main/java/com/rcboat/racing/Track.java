@@ -440,8 +440,8 @@ final class Track {
         laneMax = 14f;
         halfWidth = 30f;
         offCourse = 150f;
-        buoyRadius = 1.0f;
-        buoyScale = 2.2f;
+        buoyRadius = 2.4f;
+        buoyScale = 5.5f;      // ~15 ft across, ~26 ft to the top of the pennant
         scaleK = 10f;
         clockX = 0;
         clockZ = cz;

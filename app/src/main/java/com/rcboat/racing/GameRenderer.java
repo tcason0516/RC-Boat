@@ -1148,14 +1148,15 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             float ex = (sh[0] + handW[0]) * 0.5f + s * 0.11f;
             float ey = (sh[1] + handW[1]) * 0.5f - 0.11f;
             float ez = (sh[2] + handW[2]) * 0.5f + 0.03f;
-            material(0.12f, 10f, false);
-            limb(bm, sh[0], sh[1], sh[2], ex, ey, ez, 0.095f, sr, sg, sb);
-            limb(bm, ex, ey, ez, handW[0], handW[1], handW[2], 0.076f, sr, sg, sb);
-            sphereAt(bm, ex, ey, ez, 0.046f, sr, sg, sb);
-            // white suit cuff just short of the glove
-            float cx = ex + (handW[0] - ex) * 0.86f, cy = ey + (handW[1] - ey) * 0.86f, cz = ez + (handW[2] - ez) * 0.86f;
-            limb(bm, cx, cy, cz, ex + (handW[0] - ex) * 0.95f, ey + (handW[1] - ey) * 0.95f,
-                    ez + (handW[2] - ez) * 0.95f, 0.082f, 0.92f, 0.92f, 0.92f);
+            Mesh[] sl = lifeScene.sleeves[boatColor[i]];
+            material(0.14f, 12f, false);
+            limb(bm, sh[0], sh[1], sh[2], ex, ey, ez, 0.104f, s, sl[0]);
+            limb(bm, ex, ey, ez, handW[0], handW[1], handW[2], 0.09f, s, sl[1]);
+            Matrix.setIdentityM(tmpB, 0);
+            Matrix.translateM(tmpB, 0, ex, ey, ez);
+            Matrix.scaleM(tmpB, 0, 0.05f * s, 0.05f, 0.05f);
+            Matrix.multiplyMM(model, 0, bm, 0, tmpB, 0);
+            drawLit(sl[2]);
         }
     }
 
@@ -1209,7 +1210,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     /** A box of square cross-section th from point a to point b (boat coordinates). */
     private void limb(float[] bm, float ax, float ay, float az, float bx, float by, float bz, float th,
-                      float cr, float cg, float cb) {
+                      float side, Mesh mesh) {
         float dx = bx - ax, dy = by - ay, dz = bz - az;
         float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
         float ux = dx / len, uy = dy / len, uz = dz / len;
@@ -1218,14 +1219,16 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         float pl = (float) Math.sqrt(px * px + py * py + pz * pz);
         if (pl < 1e-3f) { px = 1; py = 0; pz = 0; pl = 1; }
         px /= pl; py /= pl; pz /= pl;
+        px *= side; pz *= side;   // the elbow pad faces away from the body
         float qx = uy * pz - uz * py, qy = uz * px - ux * pz, qz = ux * py - uy * px;
+        if (qy < 0) { qx = -qx; qy = -qy; qz = -qz; px = -px; pz = -pz; }   // +z of the sleeve = up
         float[] m = tmpB;
         m[0] = px * th; m[1] = py * th; m[2] = pz * th; m[3] = 0;
         m[4] = ux * len; m[5] = uy * len; m[6] = uz * len; m[7] = 0;
         m[8] = qx * th; m[9] = qy * th; m[10] = qz * th; m[11] = 0;
         m[12] = (ax + bx) / 2; m[13] = (ay + by) / 2; m[14] = (az + bz) / 2; m[15] = 1;
         Matrix.multiplyMM(model, 0, bm, 0, m, 0);
-        drawLitTint(lifeScene.limb, cr, cg, cb);
+        drawLit(mesh);
     }
 
     /** Soft dark ellipses under the boats and buoys, nudged away from the sun. */

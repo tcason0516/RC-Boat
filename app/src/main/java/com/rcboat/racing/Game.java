@@ -207,7 +207,10 @@ final class Game {
             float back = 4f + row * 3.6f + (col == 1 ? 1.2f : 0f);
             int idx = track.wrap(-Math.round(back / track.ds));
             Boat b = boats[i];
-            b.placeAt(track, idx, col == 0 ? 2.4f : -2.4f);
+            float lat = col == 0 ? 2.4f : -2.4f;
+            // ovals: keep the grid clear of the start / finish buoy on the inside
+            if (track.impba) lat = col == 0 ? -track.insideSign * 2.6f : track.insideSign * 0.9f;
+            b.placeAt(track, idx, lat);
             b.lapWrap = -1;
             b.progress = -track.length + track.cum[idx];
         }
@@ -709,8 +712,8 @@ final class Game {
     }
 
     /**
-     * IMPBA ovals: a boat must keep every buoy on its left (inside). Passing a buoy's
-     * position on the inside of it is a cut.
+     * IMPBA ovals: a boat must keep every buoy on the inside of the turn (its right).
+     * Passing a buoy's position on the inside of it is a cut.
      */
     private void checkCuts(Boat b, int from, int to) {
         int step = to - from;
@@ -722,7 +725,7 @@ final class Game {
             if (rel <= 0) rel += Track.N;
             if (rel > step) continue;
             float lat = (b.x - track.px[bi]) * track.nx(bi) + (b.z - track.pz[bi]) * track.nz(bi);
-            if (lat > bu[5]) {
+            if ((lat - bu[5]) * track.insideSign > 0) {
                 int num = (int) bu[3];
                 infraction(b, num > 0 ? "CUT BUOY " + num : "CUT A BUOY", "cut");
             }

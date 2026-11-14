@@ -128,7 +128,7 @@ final class Boat {
             // turn buoys, so aim wide by the chord's sag (look * angle / 8) and a margin
             float dot = clamp(t.tx[trackIdx] * t.tx[ti] + t.tz[trackIdx] * t.tz[ti], -1f, 1f);
             float ang = (float) Math.acos(dot);
-            aim -= look * ang / 8f * 1.6f + ang * 1.2f;
+            aim -= t.insideSign * (look * ang / 8f * 1.6f + ang * 1.7f);
         }
         float tgx = t.px[ti] + t.nx(ti) * aim;
         float tgz = t.pz[ti] + t.nz(ti) * aim;
@@ -146,6 +146,15 @@ final class Boat {
             }
         }
 
+        if (t.impba) {
+            // never steer for a point on the buoy side of the lane, even when dodging a boat
+            float lat = (tgx - t.px[ti]) * t.nx(ti) + (tgz - t.pz[ti]) * t.nz(ti);
+            float lim = lat;
+            if (t.insideSign < 0) lim = Math.max(lat, t.laneMin - 0.3f);
+            else lim = Math.min(lat, t.laneMax + 0.3f);
+            tgx += t.nx(ti) * (lim - lat);
+            tgz += t.nz(ti) * (lim - lat);
+        }
         float desired = (float) Math.atan2(-(tgx - x), -(tgz - z));
         float diff = wrapAngle(desired - heading);
         steer = clamp(-diff * 2.6f, -1f, 1f);

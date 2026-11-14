@@ -32,8 +32,8 @@ that release. New builds install over the old one.
   Serpentine, Dog Bone, Clover, Speedway, Heart, plus the three official IMPBA courses at
   their real sizes: the **1/3 mile oval** (880 ft around, 35 ft turns), the **1/4 mile oval**
   (660 ft, 15 ft turns) and the **1/5 mile electric oval** (528.5 ft, 30 ft turns). On these
-  the six numbered orange turn buoys mark the inside of the turns: race counter-clockwise and
-  keep them on your left. A floating digital start clock sits in the infield.
+  the six numbered orange turn buoys mark the inside of the turns. As in the rule book, the
+  course runs clockwise with right turns only: keep the buoys on your right. A floating digital start clock sits in the infield.
 - **Power:** Electric (instant throttle) or one of the IMPBA Large Scale Gas engine classes:
   Super Sport (25.5 cc spec engine), LSG27, LSG36 or TLSG64 twin. Bigger engines are faster;
   gas engines take a moment to rev up and sound like a two-stroke. Opponents use your class.

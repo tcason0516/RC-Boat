@@ -106,54 +106,92 @@ final class HudView extends View {
         textC(c, "RC BOAT RACING", w / 2f, py + 9 * u, 7 * u, Color.WHITE);
         final Game g = game;
         Track tr = g.track;
-        String line1 = tr.name + (tr.impba ? " (" + tr.info + ")" : "") + "  \u2022  "
-                + Boat.HULL_NAMES[g.hull] + ": " + Boat.HULL_INFO[g.hull];
-        String line2 = Game.POWER_INFO[g.power] + "  \u2022  " + Game.RULE_INFO[g.rules];
-        textC(c, line1, w / 2f, py + 14.5f * u, 3.2f * u, 0xFF9FD8FF);
-        textC(c, line2, w / 2f, py + 18.5f * u, 3.2f * u, 0xFF9FD8FF);
+        String line1 = tr.name + (tr.impba && tr.info.length() > 0 ? " (" + tr.info + ")" : "")
+                + (g.event != Game.EVENT_RACE ? "  \u2022  " + Game.EVENT_INFO[g.event] : "")
+                + "  \u2022  " + Boat.HULL_NAMES[g.hull] + ": " + Boat.HULL_INFO[g.hull];
+        String line2 = (g.raceClass != RaceClass.OPEN ? RaceClass.INFO[g.raceClass] : Game.POWER_INFO[g.power])
+                + "  \u2022  " + Game.RULE_INFO[g.rules];
+        textFit(c, line1, w / 2f, py + 14.5f * u, 3.2f * u, pw - 8 * u, 0xFF9FD8FF);
+        textFit(c, line2, w / 2f, py + 18.5f * u, 3.2f * u, pw - 8 * u, 0xFF9FD8FF);
 
         // two clearly separated columns of setting cards, each with a heading
         float gap = 5 * u;
         float colW = (pw - 6 * u - gap) / 2f;
         float x0 = px + 3 * u, x1 = x0 + colW + gap;
-        float rowH = 8.9f * u;
+        float rowH = 7.6f * u;
         float y0 = py + 27 * u;
         heading(c, x0, py + 24.2f * u, colW, "RACE");
         heading(c, x1, py + 24.2f * u, colW, "BOAT & OPTIONS");
 
-        int nP = Game.POWER_NAMES.length;
-        row(c, x0, y0, colW, rowH, "Track", shortTrack(tr),
-                () -> g.setTrack(g.trackId - 1), () -> g.setTrack(g.trackId + 1));
-        row(c, x0, y0 + rowH, colW, rowH, "Laps", String.valueOf(g.laps),
-                () -> g.laps = Math.max(1, g.laps - 1),
-                () -> g.laps = Math.min(9, g.laps + 1));
-        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
-                () -> g.opponents = Math.max(0, g.opponents - 1),
-                () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
-        row(c, x0, y0 + 3 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+        boolean solo = g.event != Game.EVENT_RACE;
+        int nE = Game.EVENT_NAMES.length, nT = Track.COUNT, nH = Boat.HULL_NAMES.length,
+                nP = Game.POWER_NAMES.length, nS = Game.START_NAMES.length, nC = RaceClass.COUNT;
+        String len = g.timed() ? "5 min" : g.laps + (g.laps == 1 ? " lap" : " laps");
+        if (g.event == Game.EVENT_SPEED && !g.timed()) len = g.laps + (g.laps == 1 ? " lap" : " laps");
+        row(c, x0, y0, colW, rowH, "Event", Game.EVENT_NAMES[g.event],
+                () -> { g.event = (g.event + nE - 1) % nE; g.enforceRules(); },
+                () -> { g.event = (g.event + 1) % nE; g.enforceRules(); });
+        row(c, x0, y0 + rowH, colW, rowH, "Track", shortTrack(tr),
+                () -> stepTrack(g, -1), () -> stepTrack(g, 1));
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Length", len,
+                () -> g.laps = g.laps <= 1 ? Game.TIMED : (g.timed() ? 9 : g.laps - 1),
+                () -> g.laps = g.timed() ? 1 : (g.laps >= 9 ? Game.TIMED : g.laps + 1));
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Opponents", solo ? "Solo" : String.valueOf(g.opponents),
+                () -> { if (!solo) g.opponents = Math.max(0, g.opponents - 1); },
+                () -> { if (!solo) g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1); });
+        row(c, x0, y0 + 4 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
                 () -> g.difficulty = Math.max(0, g.difficulty - 1),
                 () -> g.difficulty = Math.min(2, g.difficulty + 1));
-        row(c, x0, y0 + 4 * rowH, colW, rowH, "Start", Game.START_NAMES[g.startMode],
-                () -> g.startMode = (g.startMode + 2) % 3, () -> g.startMode = (g.startMode + 1) % 3);
-        row(c, x0, y0 + 5 * rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
+        row(c, x0, y0 + 5 * rowH, colW, rowH, "Start",
+                g.event == Game.EVENT_SPEED ? "Standing" : Game.START_NAMES[g.startMode],
+                () -> g.startMode = RaceClass.step(g.startMode, -1, nS, g::startOk),
+                () -> g.startMode = RaceClass.step(g.startMode, 1, nS, g::startOk));
+        row(c, x0, y0 + 6 * rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
                 () -> g.rules = (g.rules + 2) % 3, () -> g.rules = (g.rules + 1) % 3);
 
-        row(c, x1, y0, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
-                () -> g.hull = (g.hull + 2) % 3, () -> g.hull = (g.hull + 1) % 3);
-        row(c, x1, y0 + rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
-                () -> g.power = (g.power + nP - 1) % nP, () -> g.power = (g.power + 1) % nP);
-        row(c, x1, y0 + 2 * rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
+        row(c, x1, y0, colW, rowH, "Class", RaceClass.NAMES[g.raceClass],
+                () -> { g.raceClass = (g.raceClass + nC - 1) % nC; g.enforceRules(); },
+                () -> { g.raceClass = (g.raceClass + 1) % nC; g.enforceRules(); });
+        row(c, x1, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
+                () -> g.hull = RaceClass.step(g.hull, -1, nH, h -> RaceClass.hullOk(g.raceClass, h)),
+                () -> g.hull = RaceClass.step(g.hull, 1, nH, h -> RaceClass.hullOk(g.raceClass, h)));
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Power", Game.POWER_NAMES[g.power],
+                () -> { g.power = RaceClass.step(g.power, -1, nP, q -> RaceClass.powerOk(g.raceClass, q)); g.enforceRules(); },
+                () -> { g.power = RaceClass.step(g.power, 1, nP, q -> RaceClass.powerOk(g.raceClass, q)); g.enforceRules(); });
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
                 () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
-        row(c, x1, y0 + 3 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
                 () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
-        row(c, x1, y0 + 4 * rowH, colW, rowH, "Sound", g.soundOn ? "On" : "Off",
-                () -> g.soundOn = !g.soundOn, () -> g.soundOn = !g.soundOn);
-        row(c, x1, y0 + 5 * rowH, colW, rowH, "Announcer", g.announcerOn ? "On" : "Off",
-                () -> g.announcerOn = !g.announcerOn, () -> g.announcerOn = !g.announcerOn);
+        String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
+        row(c, x1, y0 + 5 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
+        row(c, x1, y0 + 6 * rowH, colW, rowH, "Radius buoys", g.radiusBuoys ? "On" : "Off",
+                () -> { g.radiusBuoys = !g.radiusBuoys; g.enforceRules(); },
+                () -> { g.radiusBuoys = !g.radiusBuoys; g.enforceRules(); });
 
         float bw = 56 * u, bh = 10 * u;
         button(c, (w - bw) / 2f, py + ph - bh - 2.5f * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.2f * u,
                 game::startRace);
+    }
+
+    /** Next track the class and event allow. */
+    private static void stepTrack(Game g, int dir) {
+        if (g.event == Game.EVENT_SPEED) return;   // speed runs use the 1/3-mile oval's straightaway
+        g.setTrack(RaceClass.step(g.trackId, dir, Track.COUNT, t -> RaceClass.trackOk(g.raceClass, t)));
+    }
+
+    /** Sound: On -> No voice (no announcer) -> Off. */
+    private static void cycleSound(Game g, int dir) {
+        int st = !g.soundOn ? 2 : g.announcerOn ? 0 : 1;
+        st = (st + dir + 3) % 3;
+        g.soundOn = st != 2;
+        g.announcerOn = st == 0;
+    }
+
+    /** Centred text, shrunk to fit maxW if needed. */
+    private void textFit(Canvas c, String s, float x, float y, float size, float maxW, int color) {
+        text.setTextSize(size);
+        float tw = text.measureText(s);
+        textC(c, s, x, y, tw > maxW ? size * maxW / tw : size, color);
     }
 
     /** Column heading: small spaced capitals over a thin rule. */
@@ -181,20 +219,20 @@ final class HudView extends View {
      */
     private void row(Canvas c, float x, float y, float cw, float rh, String label, String value,
                      Action dec, Action inc) {
-        float ch = rh - 1.4f * u;               // card height; the rest is the gap between cards
+        float ch = rh - 1.2f * u;               // card height; the rest is the gap between cards
         rect.set(x, y, x + cw, y + ch);
         fill.setColor(0x26FFFFFF);
         c.drawRoundRect(rect, 2 * u, 2 * u, fill);
         float mid = y + ch / 2f;
 
         text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(3.7f * u);
+        text.setTextSize(3.4f * u);
         text.setColor(0xFFDDE8F0);
         Paint.FontMetrics fm = text.getFontMetrics();
         float base = mid - (fm.ascent + fm.descent) / 2f;
         c.drawText(label, x + 2.5f * u, base, text);
 
-        float bs = ch - 1.6f * u;              // arrow button size
+        float bs = ch - 1.2f * u;              // arrow button size
         float valueW = Math.min(30 * u, cw * 0.46f);
         float incX = x + cw - 0.8f * u - bs;
         float valX = incX - 0.6f * u - valueW;
@@ -206,7 +244,9 @@ final class HudView extends View {
         button(c, decX, by, bs, bs, "\u2039", 0xFF35506A, 4.6f * u, dec);
         button(c, incX, by, bs, bs, "\u203A", 0xFF35506A, 4.6f * u, inc);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(3.7f * u);
+        text.setTextSize(3.4f * u);
+        float vw = text.measureText(value);
+        if (vw > valueW - 1.5f * u) text.setTextSize(3.4f * u * (valueW - 1.5f * u) / vw);
         text.setColor(Color.WHITE);
         c.drawText(value, valX + valueW / 2f, base, text);
         // tapping the value itself also steps forward
@@ -230,11 +270,16 @@ final class HudView extends View {
         c.drawText("/ " + n, 22 * u, 11.5f * u, text);
         text.setColor(Color.WHITE);
         text.setTextSize(4.6f * u);
-        c.drawText("LAP " + game.currentLap(p) + "/" + game.laps, 5 * u, 18 * u, text);
+        String lapTxt = game.timed() ? "LAP " + game.currentLap(p) : "LAP " + game.currentLap(p) + "/" + game.laps;
+        if (game.event == Game.EVENT_SPEED && p.lastSpeedMph > 0)
+            lapTxt = String.format(java.util.Locale.US, "TRAP %.1f", p.lastSpeedMph);
+        c.drawText(lapTxt, 5 * u, 18 * u, text);
         text.setTextSize(4.2f * u);
         text.setColor(0xFFFFE082);
         float shown = p.finished ? p.finishTime : game.raceTime;
-        c.drawText(Game.formatTime(shown), 5 * u, 23.5f * u, text);
+        if (game.timed() && !p.finished && game.state == Game.State.RACING)
+            shown = Math.max(0f, Game.RACE_SECONDS - game.raceTime);
+        c.drawText(Game.formatTime(shown) + (game.timed() && !p.finished ? " LEFT" : ""), 5 * u, 23.5f * u, text);
         if (pen) {
             text.setColor(0xFFFF8A65);
             text.setTextSize(3.6f * u);
@@ -244,6 +289,12 @@ final class HudView extends View {
 
         // ---- minimap ----
         drawMinimap(c, w - 2 * u - 40 * u, 2 * u, 40 * u, 28 * u);
+        // ---- noise meter reading (gas boats passing the shore meter) ----
+        if (p.lastNoiseDb > 0) {
+            boolean over = p.lastNoiseDb > Game.NOISE_LIMIT;
+            textShadow(c, String.format(java.util.Locale.US, "NOISE %.0f dB", p.lastNoiseDb),
+                    w - 22 * u, 34 * u, 3.4f * u, over ? 0xFFFF5252 : 0xFFB8D4E8);
+        }
 
         // ---- top buttons ----
         float bw = 15 * u, bh = 9 * u, gap = 2 * u;
@@ -317,6 +368,8 @@ final class HudView extends View {
         int col = Color.WHITE;
         if (last) { hint = "DON'T CROSS THE LINE BEFORE ZERO"; col = 0xFFFF5252; }
         else hint = "Start line in " + Math.round(ft) + " ft  \u2022  hit it at zero";
+        if (game.countdown <= Game.NO_LAUNCH && !last)
+            textC(c, "NO-LAUNCH PERIOD", w / 2f, 32 * u, 2.8f * u, 0xFFFFB74D);
         textShadow(c, hint, w / 2f, 36 * u, 4 * u, col);
         if (game.messageTime > 0 && game.message.length() > 0)
             textShadow(c, game.message, w / 2f, h * 0.45f, 8 * u, Color.WHITE);
@@ -448,10 +501,13 @@ final class HudView extends View {
         c.drawRect(0, 0, w, h, fill);
         int n = game.order.length;
         float rowH = 7.5f * u;
-        float pw = Math.min(w * 0.9f, 110 * u), ph = 34 * u + n * rowH;
+        boolean note = game.resultNote.length() > 0;
+        float pw = Math.min(w * 0.9f, 110 * u), ph = 34 * u + n * rowH + (note ? 6 * u : 0);
         float px = (w - pw) / 2f, py = (h - ph) / 2f;
         panel(c, px, py, pw, ph);
-        textC(c, "RACE RESULTS", w / 2f, py + 10 * u, 6.5f * u, Color.WHITE);
+        String title = game.event == Game.EVENT_SPEED ? "SPEED RUN" : game.event == Game.EVENT_TRIAL
+                ? "TIME TRIAL" : "HEAT " + game.heat + " RESULTS";
+        textC(c, title, w / 2f, py + 10 * u, 6.5f * u, Color.WHITE);
         float y = py + 15 * u;
         for (int i = 0; i < n; i++) {
             Boat b = game.order[i];
@@ -477,12 +533,18 @@ final class HudView extends View {
             }
             text.setTextAlign(Paint.Align.RIGHT);
             String tm;
-            if (b.finished) tm = Game.formatTime(game.totalTime(b));
+            if (b.disqualified) tm = "DQ (" + b.dqReason + ")";
+            else if (game.event == Game.EVENT_SPEED)
+                tm = String.format(java.util.Locale.US, "%.1f mph", b.bestSpeedMph);
+            else if (b.finished && game.timed())
+                tm = Math.round(b.finishTarget / game.track.length) + " laps  " + Game.formatTime(game.totalTime(b));
+            else if (b.finished) tm = Game.formatTime(game.totalTime(b));
             else tm = "Lap " + game.currentLap(b) + "...";
             text.setColor(b.finished ? 0xFFFFE082 : 0xFF9FB4C4);
             c.drawText(tm, px + pw - 6 * u, ty, text);
             y += rowH;
         }
+        if (note) textFit(c, game.resultNote, w / 2f, y + 4.5f * u, 3.4f * u, pw - 6 * u, 0xFFFFE082);
         float bw = 40 * u, bh = 10 * u;
         float by = py + ph - bh - 4 * u;
         button(c, w / 2f - bw - 2 * u, by, bw, bh, "RACE AGAIN", 0xFF2E9E4F, 4.2f * u, game::startRace);

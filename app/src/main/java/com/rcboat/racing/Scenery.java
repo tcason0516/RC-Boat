@@ -51,6 +51,7 @@ final class Scenery {
             boats[Boat.V_HULL][i] = buildVHull(Game.COLORS[i]);
             boats[Boat.HYDROPLANE][i] = buildHydroplane(Game.COLORS[i]);
             boats[Boat.OUTRIGGER][i] = buildOutrigger(Game.COLORS[i]);
+            boats[Boat.CATAMARAN][i] = buildCatamaran(Game.COLORS[i]);
             figures[i] = buildFigure(Game.COLORS[i]);
         }
     }
@@ -760,6 +761,78 @@ final class Scenery {
         mb.box(0, 0.0f, 0.66f, 0.03f, 0.12f, 0.08f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(0.1f, -0.01f, 0.6f, 0.02f, 0.14f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
         mb.box(-0.1f, 0.42f, 0.3f, 0.012f, 0.4f, 0.012f, 0, 0.08f, 0.08f, 0.08f);
+        return mb.build();
+    }
+
+    /**
+     * Catamaran (tunnel hull with offshore-style freeboard): two long sponsons joined by a
+     * high deck, an enclosed canopy and a raised engine hatch.
+     */
+    private static Mesh buildCatamaran(float[] col) {
+        MeshBuilder mb = new MeshBuilder();
+        for (int s = -1; s <= 1; s += 2) {
+            pod(mb, s * 0.19f,
+                    new float[]{-0.72f, -0.55f, -0.3f, 0.1f, 0.4f, 0.62f},
+                    new float[]{0.0f, 0.06f, 0.075f, 0.08f, 0.08f, 0.08f},
+                    new float[]{0.21f, 0.2f, 0.19f, 0.18f, 0.18f, 0.18f},
+                    new float[]{0.1f, 0.03f, 0.0f, -0.01f, -0.01f, -0.01f},
+                    new float[]{0.08f, -0.03f, -0.06f, -0.07f, -0.07f, -0.06f},
+                    col, dark(col, 0.35f), col, 1);
+        }
+        // deck plate across both sponsons, the tunnel left open underneath
+        float[] dk = dark(col, 0.8f);
+        mb.box(0, 0.205f, 0.03f, 0.5f, 0.03f, 1.1f, 0, col[0], col[1], col[2]);
+        mb.box(0, 0.19f, -0.56f, 0.3f, 0.02f, 0.2f, 0, dk[0], dk[1], dk[2]);
+        mb.box(0, 0.224f, -0.36f, 0.4f, 0.008f, 0.14f, 0, WHITE[0], WHITE[1], WHITE[2]);
+        // enclosed canopy and engine hatch
+        mb.sphere(0, 0.235f, -0.1f, 0.12f, 0.075f, 0.2f, 14, 7, 0.05f, 0.08f, 0.11f);
+        mb.box(0, 0.25f, 0.3f, 0.26f, 0.06f, 0.36f, 0, WHITE[0], WHITE[1], WHITE[2]);
+        mb.box(0, 0.285f, 0.3f, 0.2f, 0.012f, 0.3f, 0, col[0], col[1], col[2]);
+        // twin rudders, strut and antenna
+        for (int s = -1; s <= 1; s += 2) mb.box(s * 0.19f, -0.06f, 0.64f, 0.02f, 0.15f, 0.07f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(0, 0.0f, 0.66f, 0.03f, 0.1f, 0.08f, 0, 0.75f, 0.75f, 0.78f);
+        mb.box(-0.12f, 0.42f, 0.4f, 0.012f, 0.4f, 0.012f, 0, 0.08f, 0.08f, 0.08f);
+        return mb.build();
+    }
+
+    /**
+     * Course equipment for the IMPBA courses: timing-beam posts (1-inch pipe, RX / TX units)
+     * on the buoy 1 and buoy 6 lines of the ovals, and the noise meter on its tripod on the
+     * shore, 4-6 ft up, 25 ft back from the water.
+     */
+    static Mesh buildCourseKit(Track t) {
+        MeshBuilder mb = new MeshBuilder();
+        if (t.oval) {
+            for (float x : new float[]{t.trapWest, t.trapEast}) {
+                for (float z : new float[]{t.beamNearZ, t.beamFarZ}) {
+                    float g = Math.max(World.baseHeight(x, z), -0.05f);
+                    float bottom = Math.min(g, -0.6f);
+                    mb.cylinder(x, bottom, z, 0.035f, 0.035f, 0.55f - bottom, 6, 0.55f, 0.56f, 0.58f, true);
+                    mb.box(x, 0.62f, z, 0.12f, 0.16f, 0.1f, 0, 0.12f, 0.12f, 0.14f);
+                    mb.box(x, 0.62f, z + (z > t.frontBuoyZ ? -0.051f : 0.051f), 0.05f, 0.05f, 0.01f, 0,
+                            0.85f, 0.1f, 0.1f);   // the beam window
+                }
+            }
+        }
+        float mx = t.meterX, mz = t.meterZ;
+        float g = World.baseHeight(mx, mz);
+        float h = 1.5f;   // ~5 ft
+        for (int k = 0; k < 3; k++) {
+            double a = k * 2.094;
+            float lx = mx + 0.3f * (float) Math.cos(a), lz = mz + 0.3f * (float) Math.sin(a);
+            float[] top = {mx, g + h - 0.1f, mz}, foot = {lx, g, lz};
+            float dx = top[0] - foot[0], dz = top[2] - foot[2];
+            float len = (float) Math.sqrt(dx * dx + dz * dz + (h - 0.1f) * (h - 0.1f));
+            // a leg: a thin box leaning in, approximated by stacked short segments
+            int seg = 6;
+            for (int i = 0; i < seg; i++) {
+                float f0 = (i + 0.5f) / seg;
+                mb.box(foot[0] + dx * f0, g + (h - 0.1f) * f0, foot[2] + dz * f0, 0.03f, len / seg, 0.03f, 0,
+                        0.15f, 0.15f, 0.16f);
+            }
+        }
+        mb.box(mx, g + h, mz, 0.08f, 0.22f, 0.06f, 0, 0.9f, 0.85f, 0.2f);       // the meter
+        mb.box(mx, g + h + 0.06f, mz - 0.05f, 0.05f, 0.05f, 0.06f, 0, 0.1f, 0.1f, 0.1f); // microphone
         return mb.build();
     }
 

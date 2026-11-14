@@ -11,13 +11,15 @@ final class Boat {
     static final float TURN_RATE = 2.3f;        // rad/s at full lock
 
     // Hull types: name, top speed (m/s), acceleration, turn rate, side grip
-    static final int V_HULL = 0, HYDROPLANE = 1, OUTRIGGER = 2;
-    static final String[] HULL_NAMES = {"V-Hull", "Hydroplane", "Outrigger"};
-    static final String[] HULL_INFO = {"Balanced all-rounder", "Fastest, slides in turns", "Grippy, sharp turns"};
+    static final int V_HULL = 0, HYDROPLANE = 1, OUTRIGGER = 2, CATAMARAN = 3;
+    static final String[] HULL_NAMES = {"V-Hull", "Hydroplane", "Outrigger", "Catamaran"};
+    static final String[] HULL_INFO = {"Mono: balanced all-rounder", "Fastest, slides in turns",
+            "Grippy, sharp turns", "Tunnel hull: fast, stable, wide turns"};
     private static final float[][] HULL_STATS = {
             {12.8f, 7.6f, 2.30f, 3.2f},
             {13.2f, 8.0f, 1.85f, 1.6f},
             {13.0f, 7.1f, 2.60f, 4.8f},
+            {13.3f, 7.4f, 2.05f, 3.8f},
     };
 
     final int id;
@@ -70,6 +72,25 @@ final class Boat {
     /** Clock-start pacing for the AI: average speed to hold (m/s), or -1 for none. */
     float paceSpeed = -1;
     float startDelay;          // AI: how late after zero it aims to hit the line
+
+    // lap timing (for records)
+    int lapsDone = -1;         // completed laps; -1 until the start line is first crossed
+    float lapStartTime;
+    float bestLap;             // 0 = none yet
+    /** Timed races: the score (distance) at which this boat takes the checkered flag. */
+    float finishTarget = -1;
+
+    // speed runs: time entering the trap, and the best speed (mph)
+    float trapEnterTime = -1;
+    float bestSpeedMph, lastSpeedMph;
+
+    // noise rule (gas): engine noise offset (dB) for this boat's tune, and its status
+    float noiseTune;
+    float lastNoiseDb;
+    boolean disqualified;
+    String dqReason = "";
+    /** Drawn larger for Super Boats. */
+    float sizeScale = 1f;
     Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
         this.hull = hull;
@@ -239,6 +260,7 @@ final class Boat {
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(heading), 0, 1, 0);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(p), 1, 0, 0);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(rl), 0, 0, 1);
+        if (sizeScale != 1f) android.opengl.Matrix.scaleM(m, 0, sizeScale, sizeScale, sizeScale);
     }
 
     static float wrapAngle(float a) {

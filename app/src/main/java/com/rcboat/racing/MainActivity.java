@@ -19,6 +19,8 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         game = new Game();
+        game.records.load(getSharedPreferences("rcboat", MODE_PRIVATE).getString("records", ""));
+        game.records.dirty = false;
         sound = new EngineSound(game);
 
         glView = new GLSurfaceView(this);
@@ -67,9 +69,18 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         game.setPaused(true);
+        saveRecords();
         hud.stopVoice();
         sound.stop();
         glView.onPause();
+    }
+
+    /** Saves best times and speeds when they changed. */
+    void saveRecords() {
+        if (!game.records.dirty) return;
+        game.records.dirty = false;
+        getSharedPreferences("rcboat", MODE_PRIVATE).edit()
+                .putString("records", game.records.serialize()).apply();
     }
 
     @Override

@@ -410,6 +410,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private Track track;
     private boolean islandOn;
     private final Mesh[] gates = new Mesh[Track.COUNT];
+    private final Mesh[] kits = new Mesh[Track.COUNT];
     private int boatCount;
     private String clockText = "";
     private boolean clockColon;
@@ -545,6 +546,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
         scene = new Scenery(game);
         java.util.Arrays.fill(gates, null);
+        java.util.Arrays.fill(kits, null);
         bakeShadows();
 
         GLES20.glClearColor(Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2], 1f);
@@ -699,6 +701,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             fillParticles(game.particles);
         }
         if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
+        if (track.impba && kits[track.id] == null) kits[track.id] = Scenery.buildCourseKit(track);
         fillShadows();
 
         Matrix.perspectiveM(proj, 0, cam[9], aspect, cam[10], 700f);
@@ -797,7 +800,10 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         }
         material(0.35f, 40f, false);
         if (!track.impba) drawLit(gates[track.id]);
-        else drawClock();
+        else {
+            if (kits[track.id] != null) drawLit(kits[track.id]);
+            drawClock();
+        }
 
         // RC drivers on the platform
         material(0.15f, 12f, false);

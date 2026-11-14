@@ -34,19 +34,42 @@ that release. New builds install over the old one.
   (660 ft, 15 ft turns) and the **1/5 mile electric oval** (528.5 ft, 30 ft turns). On these
   the six numbered orange turn buoys mark the inside of the turns. As in the rule book, the
   course runs clockwise with right turns only: keep the buoys on your right. A floating digital start clock sits in the infield.
+- **Offshore Courses A, B and C** from the rule book's diagrams (page I-7), scaled to the lake
+  (the book gives no sizes). Right turns; Course C has one left kink.
+- **Event:** *Race*, solo *Time trial* (best lap and race time records), or *Speed run* on the
+  1/3 mile oval's 330 ft front chute, the 1/16 mile straightaway: timing beams on the buoy 1
+  and buoy 6 lines clock each westbound pass in mph.
+- **Records** are saved for every course, class, engine and hull — except LSG36 Offshore,
+  which the rules exclude.
+- **Class:** *Open*, or an IMPBA class that only allows its legal boats and engines:
+  LSG27, LSG36, Sport Hydro, Twin Gas Outrigger (TLSG64 only), Super Sport, LSG36 Offshore,
+  Super Boat Offshore (55-60 in boats, Offshore Courses A/B only), Crackerbox, Classic
+  Thunderboat, Jersey Speed Skiff, Outboard Tunnel, Gas Scale Unlimited.
+- **Boats:** V-Hull (mono), Hydroplane, Outrigger and Catamaran (tunnel hull).
 - **Power:** Electric (instant throttle) or one of the IMPBA Large Scale Gas engine classes:
   Super Sport (25.5 cc spec engine), LSG27, LSG36 or TLSG64 twin. Bigger engines are faster;
   gas engines take a moment to rev up and sound like a two-stroke. Opponents use your class.
-- **Start:** *Standing* (3-2-1 from the line), or the IMPBA **clock start**: boats run while
-  the clock counts down and must reach the start line just after zero. *Clock, full* uses the
-  rule book's 2.5 minutes (gas) or 60 seconds (electric); *Clock, short* uses 30 s / 15 s.
-  Crossing the line in the last 5 seconds is a jump start.
+- **Start:** *Standing* (3-2-1 from the line), *Le Mans* (boats side by side near the shore,
+  run out to the course), or the IMPBA **clock start**: boats run while the clock counts down
+  and must reach the start line just after zero. *Clock, full* is the rule book's 2.5 minutes
+  (gas) or 60 seconds (electric); *Clock, short* is 30 s / 15 s; *Clock, 5 s* is the Fast
+  Electric Enduro clock. Crossing the line in the last 5 seconds is a jump start, and no boat
+  may be re-launched (put back on the course) in the last 30 seconds.
+- **Length:** 1-9 laps, or a timed race on the clock's 5:00 race time (when time is up,
+  every boat finishes at its next line crossing; most laps wins). After each heat the clock
+  shows the heat number.
 - **Buoy rule:** *Just for fun* (no penalties), *Time penalty* (+3 s) or *Lap penalty*
-  (+1 lap) for each buoy hit, buoy cut (passing inside a turn buoy) or jump start.
+  (+1 lap) for each buoy hit, buoy cut (passing inside a turn buoy) or jump start. In Gas
+  Scale Unlimited, parts knocked off by hitting the shore also cost a lap.
+- **Noise rule:** gas boats are measured by a meter on a tripod on the shore between buoy 6
+  and the start line (shown on screen as you pass). Over 92 dB: a warning; over again in a
+  later heat: disqualified.
+- **Radius buoys:** the optional extra buoys between 1&2, 2&3, 4&5 and 5&6 on the ovals.
 - **Announcer:** calls the race out loud — who's in the lead, places gained and lost, buoy
   hits, going off course, laps to go and the winner. Voice only; turn it off with
   *Announcer* in the menu.
-- Menu options also include opponents (0–5), laps, difficulty, controls and sound.
+- Menu options also include opponents (0–5), difficulty, camera, controls and sound
+  (on, no announcer, or off).
 
 ## Credits
 

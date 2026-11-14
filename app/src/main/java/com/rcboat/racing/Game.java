@@ -48,8 +48,27 @@ final class Game {
     };
 
     // ---- start: standing start from the line, or the IMPBA clock start (Technical Standards VII) ----
-    static final int START_STANDING = 0, START_CLOCK_SHORT = 1, START_CLOCK_FULL = 2;
-    static final String[] START_NAMES = {"Standing", "Clock, short", "Clock, full"};
+    static final int START_STANDING = 0, START_CLOCK_SHORT = 1, START_CLOCK_FULL = 2,
+            START_LE_MANS = 3, START_ENDURO = 4;
+    static final String[] START_NAMES = {"Standing", "Clock, short", "Clock, full", "Le Mans", "Clock, 5 s"};
+    /** The last 30 s of the clock is the no-launch period (Technical Standards VII-B-4). */
+    static final float NO_LAUNCH = 30f;
+
+    // ---- events ----
+    static final int EVENT_RACE = 0, EVENT_TRIAL = 1, EVENT_SPEED = 2;
+    static final String[] EVENT_NAMES = {"Race", "Time trial", "Speed run"};
+    static final String[] EVENT_INFO = {"", "Solo record trial", "1/16 mile (330 ft) straightaway speed trap"};
+
+    // ---- race length: 1-9 laps, or a timed race on the 5:00 race clock ----
+    static final int TIMED = 10;
+    static final float RACE_SECONDS = 300f;
+
+    // ---- noise rule: 92 dB(A) at the shore meter (Technical Standards II-F) ----
+    static final float NOISE_LIMIT = 92f;
+    /** Typical reading per power class at full chat in front of the meter (electric: none). */
+    private static final float[] NOISE_BASE = {0f, 85.5f, 86.5f, 87.5f, 88.5f};
+    /** Each boat's engine tune for the session (dB): the player's is always legal. */
+    private final float[] noiseTune = new float[COLORS.length];
     /** No crossing the start line in the last 5 s (the clock face's coloured pie section). */
     static final float JUMP_WINDOW = 5f;
 
@@ -73,6 +92,17 @@ final class Game {
     int power = ELECTRIC;
     int startMode = START_STANDING;
     int rules = RULES_FUN;
+    int event = EVENT_RACE;
+    int raceClass = RaceClass.OPEN;
+    boolean radiusBuoys;
+    /** Heat number of this session (shown on the clock after each race). */
+    int heat;
+    /** Noise rule: boats warned in an earlier heat this session, by id. */
+    final int[] noiseWarned = new int[COLORS.length];   // heat of the warning, 0 = none
+    final Records records = new Records();
+    /** Results-screen lines about records and speed runs. */
+    String resultNote = "";
+    boolean timed() { return laps == TIMED; }
 
     // ---- race announcers (voice only) ----
     final Announcer announcer = new Announcer();
@@ -167,6 +197,9 @@ final class Game {
             // in a race everyone runs the player's power class; the demo mixes them
             int pw = withPlayer ? power : rnd.nextInt(POWER_STATS.length);
             b.setPower(POWER_STATS[pw][0], POWER_STATS[pw][1], POWER_STATS[pw][2]);
+            b.sizeScale = withPlayer ? RaceClass.sizeScale(raceClass) : 1f;
+            // engine tune: the player's is legal; some opponents run loud (noise rule)
+            b.noiseTune = noiseTune[i];
             if (!isPlayer) {
                 b.autopilot = true;
                 b.skill = withPlayer ? skillRange[difficulty] + rnd.nextFloat() * 0.06f
@@ -219,8 +252,39 @@ final class Game {
         particles.clear();
     }
 
+    /**
+     * Le Mans start: boats sit side by side near the shore in front of the drivers, noses
+     * pointing out, behind the start line, and run out to the course at the signal.
+     */
+    private void lineUpLeMans() {
+        int n = boats.length;
+        // the side of the start line nearer the shore
+        float side = track.nz(0) > 0 ? 1f : -1f;   // lateral sign that points south
+        for (int i = 0; i < n; i++) {
+            Boat b = boats[i];
+            float back = 3f + i * 3.2f;
+            int idx = track.wrap(-Math.round(back / track.ds));
+            float lat = side * 9.5f;
+            while (lat * side > 4f && !World.isWater(track.px[idx] + track.nx(idx) * lat,
+                    track.pz[idx] + track.nz(idx) * lat, false)) lat -= side * 0.5f;
+            b.placeAt(track, idx, lat);
+            // facing out over the water, angled towards the course
+            float tx = track.tx[idx], tz = track.tz[idx];
+            float ox = -track.nx(idx) * side, oz = -track.nz(idx) * side;   // towards the course
+            float dx = ox * 0.8f + tx * 0.6f, dz = oz * 0.8f + tz * 0.6f;
+            b.heading = (float) Math.atan2(-dx, -dz);
+            b.lapWrap = -1;
+            b.progress = -track.length + track.cum[idx];
+        }
+    }
+
     synchronized void startDemo() {
         state = State.MENU;
+        heat = 0;
+        java.util.Arrays.fill(noiseWarned, 0);
+        // a new session: about one opponent in four brings a loud engine
+        for (int i = 0; i < noiseTune.length; i++)
+            noiseTune[i] = i == 0 ? -2.5f : rnd.nextFloat() < 0.25f ? 2.5f + rnd.nextFloat() * 2f : -3f + rnd.nextFloat() * 2f;
         paused = false;
         createBoats(6, false);
         raceTime = 0;
@@ -233,16 +297,42 @@ final class Game {
     float clockLength() {
         boolean gas = power != ELECTRIC;
         if (startMode == START_CLOCK_FULL) return gas ? 150f : 60f;
+        if (startMode == START_ENDURO) return 5f;    // Fast Electric Enduro
         return gas ? 30f : 15f;
     }
 
+    /** Whether a start option is available with the current power (the 5 s clock is electric). */
+    boolean startOk(int mode) {
+        return mode != START_ENDURO || power == ELECTRIC;
+    }
+
+    /** Keeps every setting legal for the class, event and power chosen. */
+    synchronized void enforceRules() {
+        if (!RaceClass.hullOk(raceClass, hull))
+            hull = RaceClass.firstLegal(Boat.HULL_NAMES.length, h -> RaceClass.hullOk(raceClass, h));
+        if (!RaceClass.powerOk(raceClass, power))
+            power = RaceClass.firstLegal(POWER_NAMES.length, pw -> RaceClass.powerOk(raceClass, pw));
+        if (!startOk(startMode)) startMode = START_CLOCK_SHORT;
+        int want = trackId;
+        if (event == EVENT_SPEED) want = Track.OVAL_THIRD;
+        else if (!RaceClass.trackOk(raceClass, want)) want = Track.OFFSHORE_A;
+        if (want != trackId || track.radiusBuoys != (radiusBuoys && track.oval)) setTrack(want);
+    }
+
     synchronized void startRace() {
-        createBoats(1 + opponents, true);
+        enforceRules();
+        heat++;
+        resultNote = "";
+        boolean solo = event != EVENT_RACE;
+        createBoats(1 + (solo ? 0 : opponents), true);
         state = State.COUNTDOWN;
-        clockStart = startMode != START_STANDING;
+        boolean clockMode = startMode == START_CLOCK_SHORT || startMode == START_CLOCK_FULL
+                || startMode == START_ENDURO;
+        clockStart = clockMode && event != EVENT_SPEED;
         countdown = clockStart ? clockLength() : 4.8f;   // standing: a moment for the opening line
         clockCallAt = countdown;
         if (clockStart) spreadForClock();
+        else if (startMode == START_LE_MANS && event != EVENT_SPEED) lineUpLeMans();
         announcer.reset();
         evBuoy = evShore = evBump = false;
         annStartDelay = 0.15f;
@@ -283,6 +373,16 @@ final class Game {
      * zeros blanked, or "" when the clock is blank (it goes blank at the start).
      */
     synchronized String clockDigits() {
+        if (state == State.FINISHED && finishedFor > 2f) {
+            // after the event the clock shows the heat number
+            String h = String.valueOf(heat % 1000);
+            return "   ".substring(h.length()) + h;
+        }
+        if (state == State.RACING && timed()) {
+            int left = (int) Math.ceil(Math.max(0f, RACE_SECONDS - raceTime));
+            if (left <= 0) return "";
+            return (left / 60) + String.format(java.util.Locale.US, "%02d", left % 60);
+        }
         if (state != State.COUNTDOWN) return "";
         int secs = (int) Math.ceil(countdown);
         if (!clockStart && secs > 3) return "";
@@ -324,7 +424,7 @@ final class Game {
 
     synchronized void setTrack(int id) {
         trackId = (id + Track.COUNT) % Track.COUNT;
-        track = Track.get(trackId);
+        track = Track.get(trackId, radiusBuoys);
         buoyWobble = new float[track.buoys.size()];
         startDemo();
     }
@@ -529,6 +629,15 @@ final class Game {
                 }
                 float vn = b.vx * nx + b.vz * nz;
                 if (b.isPlayer && vn < -2.5f) evShore = true;
+                // Gas Scale Unlimited: parts knocked off (not in a collision) cost a lap
+                if (raceClass == RaceClass.SCALE && vn < -4f && state == State.RACING && !b.finished
+                        && rules != RULES_FUN && b.infractionCooldown <= 0) {
+                    b.infractionCooldown = 2.5f;
+                    b.infractions++;
+                    b.penaltyLaps++;
+                    b.lastInfraction = "COWLING OFF";
+                    if (b.isPlayer) setMessage("COWLING FELL OFF  +1 LAP", 2.2f);
+                }
                 if (vn < 0) {
                     b.vx -= nx * vn * 1.3f;
                     b.vz -= nz * vn * 1.3f;
@@ -557,6 +666,10 @@ final class Game {
         float along = Boat.clamp(track.along(b.trackIdx, b.x, b.z), -track.ds, track.ds);
         b.progress = b.lapWrap * track.length + track.cum[b.trackIdx] + along;
         if (state == State.COUNTDOWN) return;   // clock start: nothing counts until zero
+        if (demo || b.disqualified) return;
+        lapTiming(b);
+        if (track.oval) speedTrap(b, dt);
+        noiseCheck(b);
 
         // wrong way?
         float vt = b.vx * track.tx[b.trackIdx] + b.vz * track.tz[b.trackIdx];
@@ -569,18 +682,29 @@ final class Game {
 
         boolean lost = b.offCourseTime > (b.autopilot ? 3f : 6f)
                 || (b.autopilot && (b.stuckTimer > 2.5f || b.wrongWayTime > 2f));
+        // putting a boat back on the course is a re-launch: not allowed in the last 30 s
+        boolean noLaunch = state == State.COUNTDOWN && clockStart && countdown <= NO_LAUNCH;
+        if (lost && b.disqualified) lost = false;
+        if (lost && noLaunch) {
+            if (b.isPlayer && messageTime <= 0) setMessage("NO LAUNCH IN THE LAST 30 S", 1.5f);
+            lost = false;
+        }
         if (lost) {
             b.placeAt(track, b.trackIdx, 0f);
             if (b.isPlayer) setMessage("BACK ON COURSE", 1.5f);
         }
 
-        if (demo) {
-            // demo boats just keep lapping
-            return;
+        if (timed() && b.finishTarget < 0 && raceTime >= RACE_SECONDS) {
+            // time is up: each boat takes the flag the next time it crosses the line
+            b.finishTarget = (float) (Math.floor(score(b) / track.length) + 1) * track.length;
+            if (b.isPlayer) { setMessage("TIME! FINISH THIS LAP", 2f); announcer.say("white", 3, "laps", 0f, Announcer.URGENT); }
         }
-        if (!b.finished && score(b) >= laps * track.length) {
+        float target = timed() ? b.finishTarget : laps * track.length;
+        if (!b.finished && target > 0 && score(b) >= target) {
             b.finished = true;
             b.finishTime = raceTime;
+            if (timed()) b.finishTarget = target;
+            recordFinish(b);
             if (b.isPlayer) {
                 b.autopilot = true;
                 b.skill = 0.8f;
@@ -661,9 +785,9 @@ final class Game {
         // ---- laps to go, counted on the race leader ----
         int leadLap = 1;
         for (Boat b : boats) {
-            leadLap = Math.max(leadLap, Math.min(laps, (int) Math.floor(score(b) / track.length) + 1));
+            leadLap = Math.max(leadLap, Math.min(timed() ? 99 : laps, (int) Math.floor(score(b) / track.length) + 1));
         }
-        if (leadLap > annLeaderLap) {
+        if (leadLap > annLeaderLap && !timed() && event != EVENT_SPEED) {
             annLeaderLap = leadLap;
             int toGo = laps - leadLap + 1;
             if (toGo == 1) a.say("white", 3, "laps", 0f, Announcer.URGENT);
@@ -733,6 +857,105 @@ final class Game {
         }
     }
 
+    /** Lap times: laps start when the boat crosses the start / finish line. */
+    private void lapTiming(Boat b) {
+        int done = (int) Math.floor(score(b) / track.length);
+        if (done > b.lapsDone) {
+            if (b.lapsDone >= 0) {
+                float lap = raceTime - b.lapStartTime;
+                if (b.bestLap == 0 || lap < b.bestLap) b.bestLap = lap;
+                if (b.isPlayer && RaceClass.recordsAllowed(raceClass)
+                        && records.offer(recordKey("lap"), lap, false)) {
+                    setMessage("LAP RECORD  " + formatTime(lap), 2.5f);
+                }
+            }
+            b.lapsDone = done;
+            b.lapStartTime = raceTime;
+        }
+    }
+
+    /**
+     * Speed trap on an oval's front chute: the beams on the buoy 6 and buoy 1 lines (330 ft
+     * apart on the 1/3-mile oval: the 1/16-mile straightaway). Boats run it westbound.
+     */
+    private void speedTrap(Boat b, float dt) {
+        if (Math.abs(b.z - track.frontBuoyZ) > 12f) { b.trapEnterTime = -1; return; }
+        float px = b.x - b.vx * dt;   // position a frame ago
+        if (px >= track.trapEast && b.x < track.trapEast) b.trapEnterTime = raceTime;
+        if (b.trapEnterTime >= 0 && px >= track.trapWest && b.x < track.trapWest) {
+            float t = raceTime - b.trapEnterTime;
+            b.trapEnterTime = -1;
+            if (t <= 0.2f) return;
+            float mph = track.chuteFt / t * 3600f / 5280f;
+            b.lastSpeedMph = mph;
+            if (mph > b.bestSpeedMph) b.bestSpeedMph = mph;
+            if (b.isPlayer && event == EVENT_SPEED) {
+                String msg = String.format(java.util.Locale.US, "%.1f MPH", mph);
+                if (RaceClass.recordsAllowed(raceClass) && records.offer(recordKey("speed"), mph, true))
+                    msg += "  RECORD!";
+                setMessage(msg, 2.5f);
+            }
+        }
+    }
+
+    /**
+     * Noise rule: gas boats are read by the meter on the shore between buoy 6 and the start
+     * line as they pass on the front straight, well under way. Over 92 dB: a warning; over
+     * again in a later heat: disqualified.
+     */
+    private void noiseCheck(Boat b) {
+        if (power == ELECTRIC || !track.oval && !track.offshore) return;
+        if (b.lastNoiseDb > 0 && Math.abs(b.x - track.meterX) > 15f) b.lastNoiseDb = 0;   // re-arm
+        if (b.lastNoiseDb > 0 || Math.abs(b.x - track.meterX) > 1.5f) return;
+        if (b.speed() < b.topSpeed * 0.6f || Math.abs(b.z - track.meterZ) > 40f) return;
+        float dist = Math.abs(b.z - track.meterZ);
+        float db = NOISE_BASE[power] + b.noiseTune + 1.5f * b.throttleNow
+                - 20f * (float) Math.log10(Math.max(dist, 5f) / 30f);
+        b.lastNoiseDb = db;
+        if (db <= NOISE_LIMIT || rules == RULES_FUN) return;
+        String what = String.format(java.util.Locale.US, "%s %.0f dB", b.name, db);
+        if (noiseWarned[b.id] == 0) {
+            noiseWarned[b.id] = heat;
+            if (!b.isPlayer) setMessage("NOISE WARNING: " + what, 2.5f);
+        } else if (noiseWarned[b.id] < heat) {
+            b.disqualified = true;
+            b.dqReason = "Noise";
+            b.placeAt(track, b.trackIdx, track.insideSign * -12f);
+            b.autopilot = true;
+            b.maxSpeed = 0.01f;
+            setMessage("DISQUALIFIED: " + what, 2.5f);
+        }
+    }
+
+    /** Record key: event, course, laps, class, engine and hull. */
+    String recordKey(String kind) {
+        String course = kind.equals("speed") ? "s" : trackId + (radiusBuoys && track.oval ? "r" : "");
+        String len = kind.equals("race") ? "|" + (timed() ? "t" : String.valueOf(laps)) : "";
+        return kind + "|" + course + len + "|" + raceClass + "|" + power + "|" + hull;
+    }
+
+    /** At the player's finish: race-time records and the results-screen note. */
+    private void recordFinish(Boat b) {
+        if (!b.isPlayer) return;
+        StringBuilder n = new StringBuilder();
+        boolean allowed = RaceClass.recordsAllowed(raceClass);
+        if (event == EVENT_SPEED) {
+            n.append(String.format(java.util.Locale.US, "Best speed %.1f mph", b.bestSpeedMph));
+            Float r = records.get(recordKey("speed"));
+            if (allowed && r != null) n.append(String.format(java.util.Locale.US, "   Record %.1f mph", r));
+        } else {
+            if (b.bestLap > 0) n.append("Best lap ").append(formatTime(b.bestLap));
+            if (allowed && !timed() && b.infractions == 0) {
+                boolean rec = records.offer(recordKey("race"), totalTime(b), false);
+                if (rec) n.append("   NEW RACE RECORD!");
+            }
+            Float r = records.get(recordKey("lap"));
+            if (allowed && r != null) n.append("   Lap record ").append(formatTime(r));
+        }
+        if (!allowed) n.append("   (no records in LSG36 Offshore)");
+        resultNote = n.toString();
+    }
+
     /** Clock start, AI: hold the speed that reaches the start line just after zero. */
     private void paceAi() {
         for (Boat b : boats) {
@@ -781,7 +1004,12 @@ final class Game {
         Arrays.sort(order, new Comparator<Boat>() {
             @Override
             public int compare(Boat a, Boat b) {
-                if (a.finished && b.finished) return Float.compare(totalTime(a), totalTime(b));
+                if (a.disqualified != b.disqualified) return a.disqualified ? 1 : -1;
+                if (a.finished && b.finished) {
+                    // timed races: more distance first, then the quicker
+                    if (a.finishTarget != b.finishTarget) return Float.compare(b.finishTarget, a.finishTarget);
+                    return Float.compare(totalTime(a), totalTime(b));
+                }
                 if (a.finished) return -1;
                 if (b.finished) return 1;
                 return Float.compare(score(b), score(a));
@@ -796,6 +1024,7 @@ final class Game {
 
     int currentLap(Boat b) {
         int lap = (int) Math.floor(score(b) / track.length) + 1;
+        if (timed()) return Math.max(1, lap);
         return Math.max(1, Math.min(laps, lap));
     }
 

@@ -11,15 +11,22 @@ final class Boat {
     static final float TURN_RATE = 2.3f;        // rad/s at full lock
 
     // Hull types: name, top speed (m/s), acceleration, turn rate, side grip
-    static final int V_HULL = 0, HYDROPLANE = 1, OUTRIGGER = 2, CATAMARAN = 3;
-    static final String[] HULL_NAMES = {"V-Hull", "Hydroplane", "Outrigger", "Catamaran"};
+    static final int V_HULL = 0, HYDROPLANE = 1, OUTRIGGER = 2, CATAMARAN = 3, UNLIMITED = 4;
+    static final String[] HULL_NAMES = {"V-Hull", "Hydroplane", "Outrigger", "Catamaran", "Unlimited"};
     static final String[] HULL_INFO = {"Mono: balanced all-rounder", "Fastest, slides in turns",
-            "Grippy, sharp turns", "Tunnel hull: fast, stable, wide turns"};
+            "Grippy, sharp turns", "Tunnel hull: fast, stable, wide turns",
+            "Life-size turbine Unlimited hydroplane"};
+    /** The driver's eyes in the life-size boat (boat coordinates, forward = -z). */
+    static final float[] LIFE_EYE = {0f, 1.36f, -2.0f};
+    /** RC hulls the menus offer (the Unlimited is life-size only). */
+    static final int RC_HULLS = 4;
     private static final float[][] HULL_STATS = {
             {12.8f, 7.6f, 2.30f, 3.2f},
             {13.2f, 8.0f, 1.85f, 1.6f},
             {13.0f, 7.1f, 2.60f, 4.8f},
             {13.3f, 7.4f, 2.05f, 3.8f},
+            // Unlimited: ~175 mph flat out, 0-100 mph in about 5 s, 600 ft turns at speed
+            {78f, 9.5f, 0.62f, 1.3f},
     };
 
     final int id;
@@ -92,6 +99,16 @@ final class Boat {
     String dqReason = "";
     /** Drawn larger for Super Boats. */
     float sizeScale = 1f;
+    /** Collision radius (m). */
+    float radius = RADIUS;
+    /** Scale of wakes, spray and spacing: 1 for RC boats, ~7.5 for the life-size boat. */
+    float fx = 1f;
+    /** Banking into turns. */
+    float rollK = 0.022f;
+    /** Linear water drag (1/s); the planing Unlimited barely touches the water. */
+    float waterDrag = 0.12f;
+    /** How much the nose lifts with speed. */
+    float pitchK = 1f;
     Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
         this.hull = hull;
@@ -101,6 +118,14 @@ final class Boat {
         this.turnRate = st[2];
         this.grip = st[3];
         this.maxSpeed = topSpeed;
+        if (hull == UNLIMITED) {
+            radius = 3.0f;
+            fx = 7.5f;
+            rollK = 0.0035f;
+            waterDrag = 0.012f;
+            pitchK = 0.35f;
+            throttleLag = 0.7f;   // turbines spool up slowly
+        }
         this.name = name;
         this.r = color[0];
         this.g = color[1];
@@ -150,7 +175,7 @@ final class Boat {
             // turn buoys, so aim wide by the chord's sag (look * angle / 8) and a margin
             float dot = clamp(t.tx[trackIdx] * t.tx[ti] + t.tz[trackIdx] * t.tz[ti], -1f, 1f);
             float ang = (float) Math.acos(dot);
-            aim -= t.insideSign * (look * ang / 8f * 1.6f + ang * 1.7f);
+            aim -= t.insideSign * (look * ang / 8f * 1.6f + ang * 1.7f * fx);
         }
         float tgx = t.px[ti] + t.nx(ti) * aim;
         float tgz = t.pz[ti] + t.nz(ti) * aim;
@@ -161,8 +186,8 @@ final class Boat {
             float dx = o.x - x, dz = o.z - z;
             float fwd = dx * fwdX() + dz * fwdZ();
             float side = dx * rightX() + dz * rightZ();
-            if (fwd > 0 && fwd < 7f && Math.abs(side) < 1.6f) {
-                float push = (side >= 0 ? -1f : 1f) * 2.2f;
+            if (fwd > 0 && fwd < 7f * fx && Math.abs(side) < 1.6f * fx) {
+                float push = (side >= 0 ? -1f : 1f) * 2.2f * fx;
                 tgx += rightX() * push;
                 tgz += rightZ() * push;
             }
@@ -214,7 +239,7 @@ final class Boat {
         else acc = vf > 0.5f ? thr * accel * 1.4f : thr * accel * 0.6f;
         vf += acc * dt;
         vf -= drag * vf * Math.abs(vf) * dt;
-        vf -= vf * 0.12f * dt;                 // water friction
+        vf -= vf * waterDrag * dt;             // water friction
         if (vf < -REVERSE_MAX) vf = -REVERSE_MAX;
         vs *= (float) Math.exp(-grip * dt);    // side grip (lets boats slide a little)
 
@@ -234,9 +259,9 @@ final class Boat {
         z += vz * dt;
 
         // visual attitude
-        float targetPitch = 0.07f * clamp(vf / top, -0.3f, 1f) + 0.05f * throttle * clamp(vf / 4f, 0f, 1f);
+        float targetPitch = pitchK * (0.07f * clamp(vf / top, -0.3f, 1f) + 0.05f * throttle * clamp(vf / 4f, 0f, 1f));
         pitch += (targetPitch - pitch) * Math.min(1f, dt * 3f);
-        float targetRoll = clamp(yawRate * vf * 0.022f, -0.3f, 0.3f);
+        float targetRoll = clamp(yawRate * vf * rollK, -0.3f, 0.3f);
         roll += (targetRoll - roll) * Math.min(1f, dt * 4f);
     }
 
@@ -256,6 +281,7 @@ final class Boat {
         float p = pitch + att[0];
         float rl = roll + att[1];
         if (hull == HYDROPLANE) p += 0.02f * clamp(forwardSpeed() / topSpeed, 0f, 1f);
+        if (hull == UNLIMITED) { p = pitch + att[0] * 0.25f; rl = roll + att[1] * 0.25f; }   // heavy: rides over the chop
         android.opengl.Matrix.setIdentityM(m, 0);
         android.opengl.Matrix.translateM(m, 0, x, y, z);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(heading), 0, 1, 0);

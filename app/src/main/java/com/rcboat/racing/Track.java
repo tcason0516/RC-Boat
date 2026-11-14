@@ -15,8 +15,13 @@ final class Track {
             "Island Loop", "Grand Oval", "Kidney Bean", "Figure Eight", "Triangle",
             "Serpentine", "Dog Bone", "Clover", "Speedway", "Heart",
             "IMPBA 1/3 Mile Oval", "IMPBA 1/4 Mile Oval", "IMPBA 1/5 Mile Electric",
-            "Offshore Course A", "Offshore Course B", "Offshore Course C"
+            "Offshore Course A", "Offshore Course B", "Offshore Course C",
+            "1.5 Mile Course", "2 Mile Course", "2.5 Mile Course"
     };
+    /** Life-size Unlimited hydroplane courses on the big lake. */
+    static final int FIRST_LIFE = 16;
+    /** Courses for each mode: RC tracks are 0..FIRST_LIFE-1. */
+    static boolean inMode(int id, boolean life) { return life == (id >= FIRST_LIFE); }
     /** First of the official IMPBA courses (Technical Standards, section V). */
     static final int FIRST_IMPBA = 10;
     /** The three Offshore Courses (Large Scale Gas, V-C-6). */
@@ -64,6 +69,12 @@ final class Track {
     final boolean oval;          // one of the IMPBA approved ovals
     final boolean offshore;      // one of the Offshore Courses
     final boolean radiusBuoys;
+    final boolean life;          // a life-size course on the big lake
+    /** How far from the centre line a boat counts as off the course, and the minimap width. */
+    float offCourse = HALF_WIDTH + 5f, halfWidth = HALF_WIDTH;
+    float buoyRadius = BUOY_RADIUS, buoyScale = 1f;
+    /** Distances that scale with the course (rubber-banding gaps etc.): 1 for RC. */
+    float scaleK = 1f;
     /** Ovals: the buoy lines through buoys 1 and 6 (x), where the timing beams cross, and
      *  the z of the front chute's buoy line and of the shore end / far end of the beams. */
     float trapWest, trapEast, frontBuoyZ, beamNearZ, beamFarZ;
@@ -97,12 +108,19 @@ final class Track {
         this.id = id;
         this.name = NAMES[id];
         this.impba = id >= FIRST_IMPBA;
+        this.life = id >= FIRST_LIFE;
         this.oval = impba && id < OFFSHORE_A;
-        this.offshore = id >= OFFSHORE_A;
+        this.offshore = id >= OFFSHORE_A && !life;
         this.radiusBuoys = radiusBuoys;
         this.hasIsland = !impba && id != 3 && id != 6 && id != 7 && id != 9;
         this.crosses = id == 3;
-        if (oval) {
+        if (life) {
+            synchronized (World.class) {
+                float old = World.scale;
+                World.scale = World.LIFE_SCALE;
+                try { buildLife(id - FIRST_LIFE); } finally { World.scale = old; }
+            }
+        } else if (oval) {
             buildOval(IMPBA[id - FIRST_IMPBA]);
         } else if (offshore) {
             buildOffshore(id);
@@ -366,6 +384,83 @@ final class Track {
         clockZ = zFront - 14f;
         meterX = 18f;
         meterZ = shore + 25f * FT;
+    }
+
+    /**
+     * Life-size Unlimited hydroplane courses: ovals of 1.5, 2 and 2.5 miles laid out off the
+     * spectator shore and run counter-clockwise (left turns), as Unlimited races are. Big
+     * inflatable turn buoys mark the inside of each turn.
+     */
+    private void buildLife(int k) {
+        float[] miles = {1.5f, 2f, 2.5f};
+        float[] radius = {170f, 190f, 210f};
+        float R = radius[k];
+        float lineOff = 18f;                       // racing line outside the buoys
+        float rc = R + lineOff;
+        float total = miles[k] * 1609.34f;        // measured on the racing line
+        float L = (total - 2 * (float) Math.PI * rc) / 2f;
+        // the front straight as close to the spectator shore as the lake allows (>= 180 m)
+        float shore = World.southShoreZ();
+        float zFront = shore - 180f;
+        for (int tries = 0; tries < 60 && !lifeFits(L, R, rc, zFront - R); tries++) zFront -= 20f;
+        float cz = zFront - R;
+        int fine = 12000;
+        float[] fx = new float[fine + 1], fz = new float[fine + 1], fc = new float[fine + 1];
+        for (int i = 0; i <= fine; i++) {
+            float s = total * i / fine;
+            float x, z;
+            // counter-clockwise from above: the front straight runs east (left to right)
+            if (s < L / 2) { x = s; z = cz + rc; }
+            else if ((s -= L / 2) < Math.PI * rc) {
+                double a = s / rc;
+                x = L / 2 + rc * (float) Math.sin(a); z = cz + rc * (float) Math.cos(a);
+            } else if ((s -= (float) Math.PI * rc) < L) { x = L / 2 - s; z = cz - rc; }
+            else if ((s -= L) < Math.PI * rc) {
+                double a = s / rc;
+                x = -L / 2 - rc * (float) Math.sin(a); z = cz - rc * (float) Math.cos(a);
+            } else { s -= (float) Math.PI * rc; x = -L / 2 + s; z = cz + rc; }
+            fx[i] = x; fz[i] = z; fc[i] = total * i / fine;
+        }
+        resample(fx, fz, fc, fine);
+        // five buoys round each turn, every 45 degrees, plus the start / finish buoy
+        for (int end = -1; end <= 1; end += 2) {
+            for (int j = 0; j <= 4; j++) {
+                double a = Math.PI * j / 4;
+                float bx = end * (L / 2 + R * (float) Math.sin(a));
+                float bz = cz + R * (float) Math.cos(a) * (end > 0 ? 1 : -1);
+                addBuoy(bx, bz, BUOY_TURN, 0);
+            }
+        }
+        addBuoy(0, cz + R, BUOY_PLAIN, 0);
+        info = String.format(java.util.Locale.US, "%.1f mi, left turns", miles[k]);
+        insideSign = 1f;
+        laneMin = -14f;
+        laneMax = lineOff - 10f;
+        halfWidth = 30f;
+        offCourse = 150f;
+        buoyRadius = 1.0f;
+        buoyScale = 2.2f;
+        scaleK = 10f;
+        clockX = 0;
+        clockZ = cz;
+    }
+
+    /** Whether a life-size oval (racing line and 30 m either side) is all open water. */
+    private static boolean lifeFits(float L, float R, float rc, float cz) {
+        for (float off : new float[]{-36f, 36f}) {
+            float r = rc + off;
+            for (int i = 0; i <= 40; i++) {
+                float x = -L / 2 + L * i / 40f;
+                if (!World.isWater(x, cz + r, false) || !World.isWater(x, cz - r, false)) return false;
+            }
+            for (int i = 0; i <= 72; i++) {
+                double a = Math.PI * i / 72 - Math.PI / 2;
+                float dx = r * (float) Math.cos(a), dz = r * (float) Math.sin(a);
+                if (!World.isWater(L / 2 + dx, cz + dz, false) || !World.isWater(-L / 2 - dx, cz + dz, false))
+                    return false;
+            }
+        }
+        return true;
     }
 
     /** Point where a line with direction (dx, dz) touches circle c (side c[3]). */

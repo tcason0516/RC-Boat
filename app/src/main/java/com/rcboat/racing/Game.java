@@ -94,6 +94,13 @@ final class Game {
     int rules = RULES_FUN;
     int event = EVENT_RACE;
     int raceClass = RaceClass.OPEN;
+    /** Life-size Unlimited hydroplane racing instead of RC boats. */
+    boolean lifeSize;
+    /** Menu page: the main menu (RC or life size), or one of the two settings menus. */
+    static final int MENU_MAIN = 0, MENU_RC = 1, MENU_LIFE = 2;
+    int menuScreen = MENU_MAIN;
+    /** The course last used in the other mode. */
+    private int otherTrack = Track.FIRST_LIFE + 1;
     boolean radiusBuoys;
     /** Heat number of this session (shown on the clock after each race). */
     int heat;
@@ -130,9 +137,9 @@ final class Game {
     float finishedFor;   // seconds since the player finished
     String message = "";
     float messageTime;
-    final Particles particles = new Particles(700);
+    final Particles particles = new Particles(1500);
     /** Rooster tails: water thrown up behind the props. */
-    final Spray spray = new Spray(1400);
+    final Spray spray = new Spray(3000);
     float[] buoyWobble;
 
     // ---- input (written by the UI thread) ----
@@ -194,12 +201,13 @@ final class Game {
         for (int i = 0; i < count; i++) {
             boolean isPlayer = withPlayer && i == 0;
             // in a race every boat uses the hull the player picked; the menu demo shows a mix
-            int h = withPlayer ? hull : rnd.nextInt(Boat.HULL_NAMES.length);
+            int h = lifeSize ? Boat.UNLIMITED : withPlayer ? hull : rnd.nextInt(Boat.RC_HULLS);
             Boat b = new Boat(i, NAMES[i], COLORS[i], isPlayer, h, rnd);
             // in a race everyone runs the player's power class; the demo mixes them
             int pw = withPlayer ? power : rnd.nextInt(POWER_STATS.length);
-            b.setPower(POWER_STATS[pw][0], POWER_STATS[pw][1], POWER_STATS[pw][2]);
-            b.sizeScale = withPlayer ? RaceClass.sizeScale(raceClass) : 1f;
+            if (!lifeSize) b.setPower(POWER_STATS[pw][0], POWER_STATS[pw][1], POWER_STATS[pw][2]);
+            b.sizeScale = withPlayer && !lifeSize ? RaceClass.sizeScale(raceClass) : 1f;
+            if (b.sizeScale != 1f) { b.radius *= b.sizeScale; b.fx = b.sizeScale; }
             // engine tune: the player's is legal; some opponents run loud (noise rule)
             b.noiseTune = noiseTune[i];
             if (!isPlayer) {
@@ -239,12 +247,14 @@ final class Game {
         for (int i = 0; i < count; i++) {
             int slot = slotOf[i];
             int row = slot / 2, col = slot % 2;
-            float back = 4f + row * 3.6f + (col == 1 ? 1.2f : 0f);
+            float gk = lifeSize ? 7f : 1f;   // grid spacing for life-size boats
+            float back = (4f + row * 3.6f + (col == 1 ? 1.2f : 0f)) * gk;
             int idx = track.wrap(-Math.round(back / track.ds));
             Boat b = boats[i];
             float lat = col == 0 ? 2.4f : -2.4f;
             // ovals: keep the grid clear of the start / finish buoy on the inside
             if (track.impba) lat = col == 0 ? -track.insideSign * 2.6f : track.insideSign * 0.9f;
+            lat *= gk;
             b.placeAt(track, idx, lat);
             b.lapWrap = -1;
             b.progress = -track.length + track.cum[idx];
@@ -298,19 +308,57 @@ final class Game {
 
     /** Clock length: 2.5 min (gas) or 60 s (electric) as in the rules, or a short version. */
     float clockLength() {
-        boolean gas = power != ELECTRIC;
+        boolean gas = power != ELECTRIC || lifeSize;
         if (startMode == START_CLOCK_FULL) return gas ? 150f : 60f;
         if (startMode == START_ENDURO) return 5f;    // Fast Electric Enduro
         return gas ? 30f : 15f;
     }
 
+    /**
+     * Lines that only suit one kind of power: the battery jokes are for electric boats only.
+     * (No gas-only lines exist yet; add them here with the opposite test.)
+     */
+    static final String[] ELECTRIC_ONLY = {"go_1", "white_2"};
+    static final String[] GAS_ONLY = {};
+
+    private void setAnnouncerBans() {
+        announcer.banned.clear();
+        boolean electric = power == ELECTRIC && !lifeSize;
+        boolean gas = power != ELECTRIC && !lifeSize;
+        if (!electric) for (String k : ELECTRIC_ONLY) announcer.banned.add(k);
+        if (!gas) for (String k : GAS_ONLY) announcer.banned.add(k);
+    }
+
     /** Whether a start option is available with the current power (the 5 s clock is electric). */
     boolean startOk(int mode) {
+        if (lifeSize) return mode == START_STANDING || mode == START_CLOCK_SHORT || mode == START_CLOCK_FULL;
         return mode != START_ENDURO || power == ELECTRIC;
     }
 
     /** Keeps every setting legal for the class, event and power chosen. */
+    /** Switches between RC racing and life-size Unlimited hydroplanes (and their worlds). */
+    synchronized void setMode(boolean life) {
+        if (life == lifeSize) return;
+        int keep = trackId;
+        lifeSize = life;
+        World.scale = life ? World.LIFE_SCALE : 1f;
+        int next = otherTrack;
+        otherTrack = keep;
+        if (life && view == VIEW_SHORE) view = VIEW_CHASE;
+        if (!life && view != VIEW_SHORE && view != VIEW_FPV && view != VIEW_CHASE) view = VIEW_SHORE;
+        setTrack(next);
+        enforceRules();
+    }
+
     synchronized void enforceRules() {
+        if (lifeSize) {
+            event = EVENT_RACE;
+            if (!startOk(startMode)) startMode = START_STANDING;
+            if (!Track.inMode(trackId, true)) setTrack(Track.FIRST_LIFE + 1);
+            if (view == VIEW_SHORE) view = VIEW_CHASE;
+            return;
+        }
+        if (!Track.inMode(trackId, false)) setTrack(0);
         if (!RaceClass.hullOk(raceClass, hull))
             hull = RaceClass.firstLegal(Boat.HULL_NAMES.length, h -> RaceClass.hullOk(raceClass, h));
         if (!RaceClass.powerOk(raceClass, power))
@@ -335,8 +383,9 @@ final class Game {
         countdown = clockStart ? clockLength() : 4.8f;   // standing: a moment for the opening line
         clockCallAt = countdown;
         if (clockStart) spreadForClock();
-        else if (startMode == START_LE_MANS && event != EVENT_SPEED) lineUpLeMans();
+        else if (startMode == START_LE_MANS && event != EVENT_SPEED && !lifeSize) lineUpLeMans();
         announcer.reset();
+        setAnnouncerBans();
         // the opening line plays in full before the countdown starts (skipped on a clock
         // too short for it, like the 5 s Enduro clock)
         announcer.enabled = announcerOn && soundOn;
@@ -427,6 +476,7 @@ final class Game {
 
     synchronized void toggleView() {
         view = (view + 1) % VIEW_NAMES.length;
+        if (lifeSize && view == VIEW_SHORE) view = VIEW_FPV;   // life size: cockpit or chase
         camInit = false;
         setMessage(VIEW_SHORT[view] + " VIEW", 1.2f);
     }
@@ -445,7 +495,11 @@ final class Game {
 
     /** Handles the Android back button. Returns false to let the app close. */
     synchronized boolean onBack() {
-        if (state == State.MENU) return false;
+        if (state == State.MENU) {
+            if (menuScreen == MENU_MAIN) return false;
+            menuScreen = MENU_MAIN;
+            return true;
+        }
         if (state == State.FINISHED && finishedFor > 2f) { startDemo(); return true; }
         paused = !paused;
         return true;
@@ -514,7 +568,7 @@ final class Game {
 
         if (player != null && state != State.MENU) {
             engineOn = true;
-            engineLevel = Boat.clamp(player.speed() / Boat.BASE_MAX_SPEED, 0f, 1.2f);
+            engineLevel = Boat.clamp(player.speed() / (lifeSize ? 75f : Boat.BASE_MAX_SPEED), 0f, 1.2f);
             engineThrottle = Math.abs(player.throttle);
         } else {
             engineOn = false;
@@ -537,8 +591,8 @@ final class Game {
                 if (b == player) continue;
                 float gap = score(b) - score(player);
                 float target = 1f;
-                if (gap < -25f) target = 1.07f;
-                else if (gap > 35f) target = 0.95f;
+                if (gap < -25f * track.scaleK) target = 1.07f;
+                else if (gap > 35f * track.scaleK) target = 0.95f;
                 b.speedMul += (target - b.speedMul) * Math.min(1f, dt * 0.5f);
             }
         }
@@ -568,7 +622,7 @@ final class Game {
                 Boat c = boats[j];
                 float dx = c.x - a.x, dz = c.z - a.z;
                 float d2 = dx * dx + dz * dz;
-                float min = Boat.RADIUS * 2f;
+                float min = a.radius + c.radius;
                 if (d2 < min * min && d2 > 1e-6f) {
                     float d = (float) Math.sqrt(d2);
                     float nx = dx / d, nz = dz / d;
@@ -586,8 +640,8 @@ final class Game {
             }
         }
         // boat vs buoys
-        float min = Boat.RADIUS + Track.BUOY_RADIUS;
         for (Boat b : boats) {
+            float min = b.radius + track.buoyRadius;
             for (int k = 0; k < track.buoys.size(); k++) {
                 float[] bu = track.buoys.get(k);
                 float dx = b.x - bu[0], dz = b.z - bu[1];
@@ -613,8 +667,8 @@ final class Game {
                 }
             }
             // the start clock floats in the infield of the IMPBA ovals
-            if (track.impba) {
-                float cmin = Boat.RADIUS + 1.1f;
+            if (track.impba && !track.life) {
+                float cmin = b.radius + 1.1f;
                 float dx = b.x - track.clockX, dz = b.z - track.clockZ;
                 float d2 = dx * dx + dz * dz;
                 if (d2 < cmin * cmin && d2 > 1e-6f) {
@@ -661,7 +715,7 @@ final class Game {
     private void updateProgress(Boat b, float dt, boolean demo) {
         int idx = track.nearest(b.x, b.z, b.trackIdx, 24);
         float dist = track.distTo(idx, b.x, b.z);
-        if (dist < Track.HALF_WIDTH + 5f) {
+        if (dist < track.offCourse) {
             int diff = idx - b.trackIdx;
             if (diff < -Track.N / 2) {
                 b.lapWrap++;
@@ -730,24 +784,29 @@ final class Game {
     private void emitWake(Boat b, float dt) {
         float spd = b.speed();
         roosterTail(b, dt, spd);
-        if (spd < 1.2f) return;
+        float w = b.fx;          // 1 for RC boats; life-size wakes are ~7.5x bigger
+        float rel = spd / b.topSpeed * 13f;   // speed as if an RC boat (m/s)
+        if (rel < 1.2f) return;
         b.wakeTimer -= dt;
         if (b.wakeTimer > 0) return;
         b.wakeTimer = 0.05f;
         float fx = b.fwdX(), fz = b.fwdZ(), rx = b.rightX(), rz = b.rightZ();
-        float sx = b.x - fx * 0.6f, sz = b.z - fz * 0.6f;
-        float k = Math.min(1f, spd / 9f);
-        float out = 0.5f + spd * 0.09f;
-        particles.emit(sx + rx * 0.2f, sz + rz * 0.2f, rx * out + b.vx * 0.1f, rz * out + b.vz * 0.1f,
-                2.0f, 0.2f, 1.1f, 0.28f * k + 0.06f);
-        particles.emit(sx - rx * 0.2f, sz - rz * 0.2f, -rx * out + b.vx * 0.1f, -rz * out + b.vz * 0.1f,
-                2.0f, 0.2f, 1.1f, 0.28f * k + 0.06f);
-        particles.emit(sx, sz, b.vx * 0.15f, b.vz * 0.15f, 0.9f, 0.28f, 0.65f, 0.45f * k + 0.08f);
-        if (spd > 7f) {
-            float bx = b.x + fx * 0.45f, bz = b.z + fz * 0.45f;
+        float sx = b.x - fx * 0.6f * w, sz = b.z - fz * 0.6f * w;
+        float k = Math.min(1f, rel / 9f);
+        float out = (0.5f + rel * 0.09f) * w;
+        float lw = w > 1.5f ? 2.6f : 1f;     // life-size foam lingers longer
+        float la = w > 1.5f ? 0.55f : 1f;    // ...but is a thinner carpet
+        particles.emit(sx + rx * 0.2f * w, sz + rz * 0.2f * w, rx * out + b.vx * 0.1f, rz * out + b.vz * 0.1f,
+                2.0f * lw, 0.2f * w, 1.1f * w, (0.28f * k + 0.06f) * la);
+        particles.emit(sx - rx * 0.2f * w, sz - rz * 0.2f * w, -rx * out + b.vx * 0.1f, -rz * out + b.vz * 0.1f,
+                2.0f * lw, 0.2f * w, 1.1f * w, (0.28f * k + 0.06f) * la);
+        particles.emit(sx, sz, b.vx * 0.15f, b.vz * 0.15f, 0.9f * lw, 0.28f * w, 0.65f * w, (0.45f * k + 0.08f) * la);
+        if (rel > 7f) {
+            float bx = b.x + fx * 0.45f * w, bz = b.z + fz * 0.45f * w;
             float side = rnd.nextBoolean() ? 1f : -1f;
-            particles.emit(bx + rx * 0.2f * side, bz + rz * 0.2f * side,
-                    rx * side * 1.6f + b.vx * 0.3f, rz * side * 1.6f + b.vz * 0.3f, 0.5f, 0.12f, 0.4f, 0.5f);
+            particles.emit(bx + rx * 0.2f * side * w, bz + rz * 0.2f * side * w,
+                    rx * side * 1.6f * w + b.vx * 0.3f, rz * side * 1.6f * w + b.vz * 0.3f, 0.5f * lw,
+                    0.12f * w, 0.4f * w, 0.5f);
         }
     }
 
@@ -758,25 +817,33 @@ final class Game {
      */
     private void roosterTail(Boat b, float dt, float spd) {
         float fwdSpd = b.forwardSpeed();
-        if (fwdSpd < 4f) { b.sprayTimer = 0; return; }
-        float k = Boat.clamp((fwdSpd - 4f) / 9f, 0f, 1.3f) * (0.55f + 0.45f * Math.max(0f, b.throttleNow));
-        float hullK = b.hull == Boat.HYDROPLANE || b.hull == Boat.OUTRIGGER ? 1.2f
+        float rel = fwdSpd / b.topSpeed;
+        if (rel < 0.3f) { b.sprayTimer = 0; return; }
+        float k = Boat.clamp((rel - 0.3f) / 0.7f, 0f, 1.3f) * (0.55f + 0.45f * Math.max(0f, b.throttleNow));
+        float big = b.fx;                         // life-size: everything ~7.5x larger
+        float tall = (float) Math.sqrt(big) * (big > 1.5f ? 1.15f : 1f);
+        float hullK = b.hull == Boat.HYDROPLANE || b.hull == Boat.OUTRIGGER || b.hull == Boat.UNLIMITED ? 1.2f
                 : b.hull == Boat.CATAMARAN ? 1.0f : 0.85f;
-        b.sprayTimer += dt * (70f + 110f * k);   // clumps per second
+        b.sprayTimer += dt * (70f + 110f * k) * (big > 1.5f ? 0.42f : 1f);   // clumps per second
         float fx = b.fwdX(), fz = b.fwdZ(), rx = b.rightX(), rz = b.rightZ();
         float sc = b.sizeScale;
-        float sx = b.x - fx * 0.66f * sc, sz = b.z - fz * 0.66f * sc;
+        float stern = big > 1.5f ? 4.7f : 0.66f * sc;
+        float sx = b.x - fx * stern, sz = b.z - fz * stern;
+        // in the chase view the player's own tail would block the view: keep it small
+        float own = b.isPlayer && view == VIEW_CHASE && state != State.MENU ? 0.45f : 1f;
         while (b.sprayTimer >= 1f) {
             b.sprayTimer -= 1f;
             float side = (rnd.nextFloat() - 0.5f) * 2f;
-            float up = (1.3f + 2.8f * k) * hullK * (0.75f + 0.5f * rnd.nextFloat()) * (float) Math.sqrt(sc);
+            float up = (1.3f + 2.8f * k) * hullK * (0.75f + 0.5f * rnd.nextFloat()) * (float) Math.sqrt(sc) * own * tall;
             // the prop throws water back at most of the boat's speed, so the plume hangs
             // in a short, narrow fan behind the transom as the boat runs away from it
             float back = fwdSpd * (0.55f + 0.2f * rnd.nextFloat());
-            float vx = b.vx - fx * back + rx * side * 0.45f;
-            float vz = b.vz - fz * back + rz * side * 0.45f;
-            spray.emit(sx + rx * side * 0.03f, b.y + 0.04f, sz + rz * side * 0.03f, vx, up, vz,
-                    0.32f + 0.4f * k, 0.06f + 0.03f * k, 0.2f + 0.24f * k * hullK, 0.2f + 0.18f * k);
+            float vx = b.vx - fx * back + rx * side * 0.45f * tall;
+            float vz = b.vz - fz * back + rz * side * 0.45f * tall;
+            spray.emit(sx + rx * side * 0.03f * big, b.y + 0.04f, sz + rz * side * 0.03f * big, vx, up, vz,
+                    (0.32f + 0.4f * k) * tall, (0.06f + 0.03f * k) * own * big,
+                    (0.2f + 0.24f * k * hullK) * own * big,
+                    (0.2f + 0.18f * k) * (0.5f + 0.5f * own) * (big > 1.5f ? 0.75f : 1f));
         }
     }
 
@@ -1093,10 +1160,11 @@ final class Game {
     synchronized void camera(float dt, float[] out) {
         if (state == State.MENU) {
             float a = time * 0.06f;
-            out[0] = (float) Math.sin(a) * 88f;
-            out[1] = 30f;
-            out[2] = (float) Math.cos(a) * 70f;
-            out[3] = 0; out[4] = -2f; out[5] = 0;
+            float k = lifeSize ? 11f : 1f;
+            out[0] = (float) Math.sin(a) * 88f * k;
+            out[1] = 30f * k;
+            out[2] = (float) Math.cos(a) * 70f * k;
+            out[3] = 0; out[4] = -2f; out[5] = lifeSize ? 250f : 0;
             out[6] = 0; out[7] = 1; out[8] = 0;
             out[9] = 52f;
             out[10] = 0.5f;
@@ -1108,6 +1176,8 @@ final class Game {
             // and it is low-pass filtered so wave chop gives a gentle sway, not a shake.
             b.waveAttitude(time, att);
             float tp = (b.pitch + att[0]) * 0.35f, tr = (b.roll + att[1]) * 0.3f;
+            // life size: the driver sits in the boat, so the view moves with the hull
+            if (lifeSize) { tp = b.pitch + att[0] * 0.25f; tr = b.roll + att[1] * 0.25f; }
             if (!camInit) {
                 fpvPitch = tp; fpvRoll = tr; fpvY = b.y;
                 camInit = true;
@@ -1117,16 +1187,23 @@ final class Game {
                 fpvRoll += (tr - fpvRoll) * k;
                 fpvY += (b.y - fpvY) * Math.min(1f, dt * 4f);
             }
+            if (lifeSize) { fpvPitch = tp; fpvRoll = tr; fpvY = b.y; }
             android.opengl.Matrix.setIdentityM(tmpM, 0);
             android.opengl.Matrix.translateM(tmpM, 0, b.x, fpvY, b.z);
             android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(b.heading), 0, 1, 0);
             android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(fpvPitch), 1, 0, 0);
             android.opengl.Matrix.rotateM(tmpM, 0, (float) Math.toDegrees(fpvRoll), 0, 0, 1);
-            transform(tmpM, 0f, 0.40f, -0.20f, 1f, out, 0);
-            transform(tmpM, 0f, 0.24f, -6f, 1f, out, 3);
+            if (lifeSize) {
+                // the driver's eyes in the cockpit, looking out over the bow
+                transform(tmpM, Boat.LIFE_EYE[0], Boat.LIFE_EYE[1], Boat.LIFE_EYE[2], 1f, out, 0);
+                transform(tmpM, 0f, Boat.LIFE_EYE[1] - 0.55f, -30f, 1f, out, 3);
+            } else {
+                transform(tmpM, 0f, 0.40f, -0.20f, 1f, out, 0);
+                transform(tmpM, 0f, 0.24f, -6f, 1f, out, 3);
+            }
             transform(tmpM, 0f, 1f, 0f, 0f, tmpV, 0);
             out[6] = tmpV[0]; out[7] = tmpV[1]; out[8] = tmpV[2];
-            out[9] = 74f;
+            out[9] = lifeSize ? 72f : 74f;
             out[10] = 0.05f;
             return;
         }
@@ -1139,13 +1216,14 @@ final class Game {
                         + Boat.wrapAngle(b.heading - chaseHeading) * Math.min(1f, dt * 4f));
             }
             float fx = (float) -Math.sin(chaseHeading), fz = (float) -Math.cos(chaseHeading);
-            float ex = b.x - fx * 3.6f, ez = b.z - fz * 3.6f;
-            float ey = Math.max(b.y + 1.45f, World.height(ex, ez) + 0.7f);
+            float ck = lifeSize ? 8f : 1f;
+            float ex = b.x - fx * 3.6f * ck, ez = b.z - fz * 3.6f * ck;
+            float ey = Math.max(b.y + 1.45f * ck, World.height(ex, ez) + 0.7f);
             out[0] = ex; out[1] = ey; out[2] = ez;
-            out[3] = b.x + b.fwdX() * 2.0f; out[4] = b.y + 0.35f; out[5] = b.z + b.fwdZ() * 2.0f;
+            out[3] = b.x + b.fwdX() * 2.0f * ck; out[4] = b.y + 0.35f * ck; out[5] = b.z + b.fwdZ() * 2.0f * ck;
             out[6] = 0; out[7] = 1; out[8] = 0;
             out[9] = 62f;
-            out[10] = 0.1f;
+            out[10] = lifeSize ? 0.5f : 0.1f;
             return;
         }
         // shore: fixed spectator on the dock who turns to follow the boat

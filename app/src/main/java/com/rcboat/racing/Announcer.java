@@ -30,6 +30,8 @@ final class Announcer {
     String clip;
 
     boolean enabled = true;
+    /** Clips that don't fit this race (e.g. battery jokes in a gas race). */
+    final java.util.HashSet<String> banned = new java.util.HashSet<>();
     private float clock;
     private float busyUntil;
     private float lastSpoke;
@@ -76,8 +78,13 @@ final class Announcer {
         if (level < URGENT && last != null && clock - last < minGap) return false;
         String key = base;
         if (variants > 0) {
-            key = base + "_" + nextVariant(base, variants);
+            // skip variants that don't fit this race
+            for (int tries = 0; tries <= variants; tries++) {
+                key = base + "_" + nextVariant(base, variants);
+                if (!banned.contains(key)) break;
+            }
         }
+        if (banned.contains(key)) return false;
         if (!AnnouncerClips.DURATION.containsKey(key)) return false;
         Float lastClip = lastClipAt.get(key);
         if (level < URGENT && lastClip != null && clock - lastClip < SAME_CLIP_GAP) return false;

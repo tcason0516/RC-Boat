@@ -10,6 +10,15 @@ final class World {
     static final float LAKE_B = 54f;   // lake semi-axis along z
     static final float ISLAND_X = 0f, ISLAND_Z = -2f, ISLAND_RX = 24f, ISLAND_RZ = 12f;
     static final float TERRAIN_HALF = 180f;
+    /**
+     * Life-size racing uses the same landscape scaled up 14 times: a lake about 2.2 x 1.5 km
+     * in hills, big enough for a 2.5 mile Unlimited hydroplane course. The RC lake is 1.
+     */
+    static final float LIFE_SCALE = 14f;
+    static volatile float scale = 1f;
+
+    /** Half the size of the terrain square at the current scale. */
+    static float terrainHalf() { return TERRAIN_HALF * scale; }
     /** Boats cannot enter places where the lake bed is higher than this. */
     static final float SHALLOW = -0.15f;
 
@@ -17,7 +26,7 @@ final class World {
 
     /** Normalised lake radius: < 1 inside the lake basin, > 1 on land. */
     static float lakeQ(float x, float z) {
-        double nx = x / LAKE_A, nz = z / LAKE_B;
+        double nx = x / (LAKE_A * scale), nz = z / (LAKE_B * scale);
         double ang = Math.atan2(nz, nx);
         double wob = 1.0 + 0.05 * Math.sin(3 * ang + 0.7) + 0.035 * Math.sin(5 * ang + 2.1)
                 + 0.02 * Math.sin(7 * ang);
@@ -29,7 +38,18 @@ final class World {
 
     /** Lake basin, beaches and hills, without the island. */
     static float baseHeight(float x, float z) {
-        float q = lakeQ(x, z);
+        float s = scale;
+        if (s != 1f) return s * baseHeight1(x / s, z / s);
+        return baseHeight1(x, z);
+    }
+
+    /** The landscape at RC scale (1). */
+    private static float baseHeight1(float x, float z) {
+        double nx0 = x / LAKE_A, nz0 = z / LAKE_B;
+        double ang0 = Math.atan2(nz0, nx0);
+        double wob0 = 1.0 + 0.05 * Math.sin(3 * ang0 + 0.7) + 0.035 * Math.sin(5 * ang0 + 2.1)
+                + 0.02 * Math.sin(7 * ang0);
+        float q = (float) (Math.sqrt(nx0 * nx0 + nz0 * nz0) / wob0);
         float h;
         if (q < 1f) {
             h = -0.4f - 2.2f * (float) Math.sqrt(1f - q);
@@ -50,6 +70,7 @@ final class World {
 
     /** Height of the island surface, or -100 outside its footprint. */
     static float islandHeight(float x, float z) {
+        if (scale != 1f) return -100f;   // no island on the big lake
         float ix = (x - ISLAND_X) / ISLAND_RX, iz = (z - ISLAND_Z) / ISLAND_RZ;
         float ri = (float) Math.sqrt(ix * ix + iz * iz);
         if (ri >= 1f) return -100f;
@@ -93,8 +114,9 @@ final class World {
 
     /** z coordinate of the south shoreline at x = 0 (where the spectator's dock is). */
     static float southShoreZ() {
-        float z = 30f;
-        while (z < 120f && baseHeight(0f, z) < 0f) z += 0.1f;
+        float s = scale;
+        float z = 30f * s;
+        while (z < 120f * s && baseHeight(0f, z) < 0f) z += 0.1f * s;
         return z;
     }
 }

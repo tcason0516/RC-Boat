@@ -18,7 +18,35 @@ final class Scenery {
     Mesh[][] boats;     // [hull][color]
     Mesh[] figures;     // RC drivers, one per color
 
-    Scenery(Game game) {
+    /** Life-size boats: [color] hull and a shared canopy; the cockpit for the driver's view. */
+    Mesh[] lifeHulls;
+    Mesh lifeCanopy, cockpit, wheel, unitBox, glove;
+    final boolean life;
+    /** The driver's eyes in the life-size boat (boat coordinates, forward = -z). */
+    static final float[] EYE = Boat.LIFE_EYE;
+    /** Steering wheel centre, its tilt back towards the driver (degrees) and rim radius. */
+    static final float[] WHEEL = {0f, 1.17f, -2.46f};
+    static final float WHEEL_TILT = 62f, WHEEL_R = 0.16f;
+    /** Shoulders of the driver (boat coordinates): just below and behind the eyes. */
+    static final float[] SHOULDER_L = {-0.25f, 1.06f, -1.95f}, SHOULDER_R = {0.25f, 1.06f, -1.95f};
+
+    Scenery(Game game) { this(game, false); }
+
+    /** life: build the big lake for life-size racing instead of the RC lake. */
+    Scenery(Game game, boolean life) {
+        this.life = life;
+        synchronized (World.class) {
+            float old = World.scale;
+            World.scale = life ? World.LIFE_SCALE : 1f;
+            try {
+                if (life) buildLife(game); else buildRc(game);
+            } finally {
+                World.scale = old;
+            }
+        }
+    }
+
+    private void buildRc(Game game) {
         sky = buildSky();
         terrain = buildTerrain();
         water = buildWater();
@@ -54,6 +82,269 @@ final class Scenery {
             boats[Boat.CATAMARAN][i] = buildCatamaran(Game.COLORS[i]);
             figures[i] = buildFigure(Game.COLORS[i]);
         }
+    }
+
+    /** A placeholder for a mesh a world doesn't use: one tiny triangle far below ground. */
+    private static Mesh nothing() {
+        MeshBuilder mb = new MeshBuilder();
+        mb.tri(new float[]{0, -500, 0}, new float[]{0.01f, -500, 0}, new float[]{0, -500, 0.01f},
+                new float[]{0, -501, 0}, new float[]{0, 0, 0});
+        return mb.build();
+    }
+
+    /**
+     * The big lake: the same landscape 14x larger, forest round the shore, a grandstand,
+     * judges' tower and pits by the start, big inflatable turn buoys, and the life-size
+     * Unlimited hydroplanes.
+     */
+    private void buildLife(Game game) {
+        sky = buildSky();
+        terrain = buildTerrain();
+        water = buildWater();
+        MeshBuilder mb = new MeshBuilder(), bk = new MeshBuilder(), rk = new MeshBuilder();
+        Random rnd = new Random(77);
+        float half = World.terrainHalf();
+        float shore = World.southShoreZ();
+        // forest: low-poly trees on the slopes round the lake
+        int placed = 0;
+        for (int tries = 0; tries < 90000 && placed < 2600; tries++) {
+            float x = (rnd.nextFloat() * 2 - 1) * half * 0.85f;
+            float z = (rnd.nextFloat() * 2 - 1) * half * 0.85f;
+            float q = World.lakeQ(x, z);
+            if (q < 1.05f || q > 2.6f) continue;
+            float h = World.baseHeight(x, z);
+            if (h < 3f) continue;
+            if (Math.abs(x) < 260f && z > shore - 10f && z < shore + 140f) continue;   // stands and pits
+            // denser near the water, thinner up the hills
+            if (rnd.nextFloat() > 1.6f - q * 0.5f) continue;
+            float sz = 2.2f + rnd.nextFloat() * 1.6f;
+            tree(mb, bk, rnd, x, h, z, sz);
+            placed++;
+        }
+        // boulders at the waterline
+        for (int i = 0; i < 140; i++) {
+            double a = rnd.nextDouble() * Math.PI * 2;
+            float x = (float) Math.cos(a) * World.LAKE_A * World.scale, z = (float) Math.sin(a) * World.LAKE_B * World.scale;
+            for (int k = 0; k < 400 && World.baseHeight(x, z) < 0.5f; k++) { x *= 1.004f; z *= 1.004f; }
+            for (int k = 0; k < 400 && World.baseHeight(x, z) > 0.5f; k++) { x *= 0.998f; z *= 0.998f; }
+            if (Math.abs(x) < 280f && z > 0) continue;
+            float s = 0.8f + rnd.nextFloat() * 2.2f;
+            float g = 0.45f + rnd.nextFloat() * 0.15f;
+            rk.lumpySphere(x, World.baseHeight(x, z), z, s * 1.3f, s * 0.7f, s, 9, 6, rnd.nextInt(),
+                    g * 2f, g * 2f, g * 1.95f);
+        }
+        raceSite(mb, rnd, shore);
+        // houses along the shore
+        for (int i = 0; i < 26; i++) {
+            double a = rnd.nextDouble() * Math.PI * 2;
+            float x = (float) Math.cos(a) * World.LAKE_A * World.scale * 1.05f;
+            float z = (float) Math.sin(a) * World.LAKE_B * World.scale * 1.05f;
+            if (Math.abs(x) < 320f && z > 0) continue;
+            for (int k = 0; k < 400 && World.baseHeight(x, z) < 4f; k++) { x *= 1.003f; z *= 1.003f; }
+            house(mb, x, z, (float) Math.atan2(x, z) + (float) Math.PI);
+        }
+        props = mb.build();
+        bark = bk.build();
+        rocks = rk.build();
+        wood = nothing();
+        foliage = nothing();
+        islandFoliage = nothing();
+        island = nothing();
+        islandProps = nothing();
+        islandBark = nothing();
+        buoyRed = buildBuoy(0.95f, 0.18f, 0.12f);
+        buoyYellow = buildBuoy(1.0f, 0.78f, 0.08f);
+        buoyTurn = buildLifeBuoy(1.0f, 0.42f, 0.05f);
+        buoyPlain = buildLifeBuoy(0.97f, 0.97f, 0.95f);
+        clockBody = nothing();
+        segment = buildSegment();
+        marker = buildMarker();
+        boats = new Mesh[Boat.HULL_NAMES.length][Game.COLORS.length];
+        lifeHulls = new Mesh[Game.COLORS.length];
+        for (int i = 0; i < Game.COLORS.length; i++) {
+            lifeHulls[i] = buildUnlimited(Game.COLORS[i], i);
+            boats[Boat.UNLIMITED][i] = lifeHulls[i];
+        }
+        lifeCanopy = buildLifeCanopy();
+        cockpit = buildCockpit();
+        wheel = buildWheel();
+        unitBox = buildSegment2();
+        MeshBuilder gb = new MeshBuilder();
+        gb.sphere(0, 0, 0, 1f, 1f, 1f, 10, 6, 0.08f, 0.08f, 0.09f);
+        glove = gb.build();
+    }
+
+    /** Grandstand, judges' tower, pit tents and a crane on the shore by the start line. */
+    private static void raceSite(MeshBuilder mb, Random rnd, float shore) {
+        // find the ground a little back from the water at x = 0
+        float z0 = shore + 25f;
+        float g = World.baseHeight(0, z0);
+        // grandstand: tiers of seats full of spectators, facing the water (north)
+        for (int tier = 0; tier < 10; tier++) {
+            float z = z0 + 8f + tier * 1.6f, y = g + 0.6f + tier * 0.75f;
+            mb.box(0, y - 0.35f, z, 180f, 0.7f + tier * 0.75f * 0f, 1.6f, 0, 0.62f, 0.62f, 0.64f);
+            for (float x = -88f; x <= 88f; x += 1.1f) {
+                if (rnd.nextFloat() < 0.18f) continue;
+                float[] c = {0.2f + rnd.nextFloat() * 0.75f, 0.2f + rnd.nextFloat() * 0.7f, 0.2f + rnd.nextFloat() * 0.7f};
+                mb.box(x, y + 0.45f, z - 0.2f, 0.5f, 0.9f, 0.4f, 0, c[0], c[1], c[2]);
+            }
+        }
+        // supports under the stand and a roof
+        mb.box(0, g + 4.5f, z0 + 25f, 180f, 9f, 0.6f, 0, 0.5f, 0.5f, 0.52f);
+        mb.box(0, g + 10.5f, z0 + 16f, 184f, 0.4f, 19f, 0, 0.85f, 0.85f, 0.87f);
+        // judges' tower at the start / finish line
+        mb.box(0, g + 6f, z0 - 6f, 4f, 12f, 4f, 0, 0.92f, 0.92f, 0.9f);
+        mb.box(0, g + 13f, z0 - 6f, 6f, 3f, 6f, 0, 0.15f, 0.18f, 0.22f);
+        mb.box(0, g + 14.8f, z0 - 6f, 6.6f, 0.4f, 6.6f, 0, 0.8f, 0.15f, 0.12f);
+        // pit tents and a crane to the east
+        for (int i = 0; i < 6; i++) {
+            float x = 120f + i * 22f, z = z0 + 6f, h = World.baseHeight(x, z);
+            mb.box(x, h + 1.5f, z, 12f, 3f, 10f, 0, 0.96f, 0.96f, 0.96f);
+            mb.cylinder(x, h + 3f, z, 8.5f, 0f, 3f, 4, Game.COLORS[i][0], Game.COLORS[i][1], Game.COLORS[i][2], false);
+        }
+        float cx = 150f, cz = shore - 2f, ch = Math.max(0f, World.baseHeight(cx, cz));
+        mb.box(cx, ch + 9f, cz, 1.2f, 18f, 1.2f, 0, 0.95f, 0.75f, 0.1f);
+        mb.box(cx, ch + 18f, cz - 9f, 0.8f, 0.8f, 20f, 0, 0.95f, 0.75f, 0.1f);
+    }
+
+    /** A big inflatable course buoy, ~6 ft wide (drawn scaled by the track's buoyScale). */
+    private static Mesh buildLifeBuoy(float r, float g, float b) {
+        MeshBuilder mb = new MeshBuilder();
+        mb.cylinder(0, -0.3f, 0, 0.42f, 0.42f, 0.9f, 16, r, g, b, true);
+        mb.sphere(0, 0.6f, 0, 0.42f, 0.32f, 0.42f, 16, 6, r, g, b);
+        mb.cylinder(0, 0.3f, 0, 0.425f, 0.425f, 0.12f, 16, 0.08f, 0.08f, 0.08f, false);
+        return mb.build();
+    }
+
+    /**
+     * A life-size Unlimited hydroplane, ~31 ft long and 14 ft wide, cab-forward: two front
+     * sponsons, a tunnel wing between them, the enclosed cockpit ahead of the turbine, and a
+     * tall rear wing. Forward is -z; the canopy glass is a separate mesh.
+     */
+    private static Mesh buildUnlimited(float[] col, int number) {
+        MeshBuilder mb = new MeshBuilder();
+        float[] bottom = dark(col, 0.3f), deck = WHITE;
+        for (int s = -1; s <= 1; s += 2) {
+            pod(mb, s * 1.6f,
+                    new float[]{-4.75f, -4.3f, -3.5f, -2.3f, -1.1f},
+                    new float[]{0f, 0.26f, 0.32f, 0.33f, 0.33f},
+                    new float[]{0.86f, 0.82f, 0.8f, 0.8f, 0.8f},
+                    new float[]{0.62f, 0.3f, 0.18f, 0.14f, 0.14f},
+                    new float[]{0.58f, 0.12f, 0.02f, 0.0f, 0.0f},
+                    col, bottom, col, 2);
+        }
+        // the tunnel wing between the sponsons
+        mb.box(0, 0.86f, -2.6f, 2.95f, 0.14f, 3.3f, 0, deck[0], deck[1], deck[2]);
+        mb.box(0, 0.94f, -3.9f, 2.95f, 0.04f, 0.5f, 0, col[0], col[1], col[2]);
+        // centre hull from the cockpit back to the transom
+        pod(mb, 0,
+                new float[]{-3.4f, -2.8f, -1.6f, 0.6f, 2.6f, 4.55f},
+                new float[]{0.35f, 0.58f, 0.68f, 0.7f, 0.66f, 0.58f},
+                new float[]{1.02f, 1.07f, 1.07f, 1.02f, 0.98f, 0.98f},
+                new float[]{0.72f, 0.56f, 0.46f, 0.42f, 0.42f, 0.45f},
+                new float[]{0.68f, 0.46f, 0.36f, 0.35f, 0.38f, 0.42f},
+                col, bottom, deck, 2);
+        // turbine intake behind the cockpit, engine cowling and exhaust
+        mb.box(0, 1.5f, -1.05f, 0.78f, 0.5f, 0.55f, 0, col[0], col[1], col[2]);
+        mb.box(0, 1.5f, -1.34f, 0.62f, 0.36f, 0.04f, 0, 0.04f, 0.04f, 0.05f);
+        mb.sphere(0, 1.15f, 1.3f, 0.6f, 0.42f, 2.2f, 16, 7, col[0], col[1], col[2]);
+        mb.sphere(0, 1.32f, 0.9f, 0.32f, 0.2f, 1.1f, 12, 5, deck[0], deck[1], deck[2]);
+        mb.cylinder(0, 1.2f, 3.55f, 0.27f, 0.24f, 0.55f, 12, 0.12f, 0.12f, 0.13f, true);
+        // rear wing on twin stabilisers
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 0.95f, 1.75f, 4.05f, 0.08f, 1.5f, 1.1f, 0, col[0], col[1], col[2]);
+        }
+        mb.box(0, 2.48f, 4.1f, 2.6f, 0.1f, 1.0f, 0, deck[0], deck[1], deck[2]);
+        mb.box(0, 2.55f, 4.1f, 2.6f, 0.04f, 0.4f, 0, col[0], col[1], col[2]);
+        // skid fin, rudder and prop strut at the transom
+        mb.box(0.8f, 0.12f, 1.2f, 0.06f, 0.6f, 0.7f, 0, 0.6f, 0.6f, 0.62f);
+        mb.box(0, 0.15f, 4.5f, 0.08f, 0.55f, 0.45f, 0, 0.6f, 0.6f, 0.62f);
+        // racing number panels (white) on the sponsons
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 1.6f, 0.83f, -2.6f, 0.5f, 0.02f, 0.9f, 0, 0.98f, 0.98f, 0.98f);
+        }
+        return mb.build();
+    }
+
+    /** The cockpit canopy: dark tinted glass. */
+    private static Mesh buildLifeCanopy() {
+        MeshBuilder mb = new MeshBuilder();
+        mb.sphere(0, 1.2f, -2.25f, 0.55f, 0.42f, 0.95f, 16, 8, 0.05f, 0.08f, 0.11f);
+        return mb.build();
+    }
+
+    /**
+     * What the driver sees of the cockpit (drawn instead of the canopy in the cockpit view):
+     * the dash with gauges, the canopy frame, the cockpit sides and the seat.
+     */
+    private static Mesh buildCockpit() {
+        MeshBuilder mb = new MeshBuilder();
+        float[] dk = {0.08f, 0.085f, 0.095f};
+        // dash
+        mb.box(0, 1.08f, -2.75f, 0.95f, 0.2f, 0.18f, 0, dk[0], dk[1], dk[2]);
+        for (int i = -2; i <= 2; i++) {
+            if (i == 0) continue;
+            mb.sphere(i * 0.18f, 1.12f, -2.655f, 0.042f, 0.042f, 0.006f, 16, 3, 0.9f, 0.9f, 0.88f);
+            mb.sphere(i * 0.18f, 1.12f, -2.65f, 0.03f, 0.03f, 0.004f, 16, 3, 0.05f, 0.05f, 0.05f);
+        }
+        // cockpit tub floor, sides and seat
+        mb.box(0, 1.075f, -2.2f, 0.9f, 0.02f, 1.2f, 0, 0.14f, 0.14f, 0.15f);
+        for (int s = -1; s <= 1; s += 2) {
+            mb.box(s * 0.5f, 1.08f, -2.1f, 0.06f, 0.16f, 1.3f, 0, dk[0], dk[1], dk[2]);
+            mb.box(s * 0.33f, 1.1f, -1.55f, 0.12f, 0.5f, 0.5f, 0, 0.15f, 0.15f, 0.17f);
+        }
+        // canopy frame: arches over the driver and the windscreen frame
+        float[] fr = {0.12f, 0.12f, 0.13f};
+        for (float z : new float[]{-2.95f, -1.75f}) {
+            for (int i = 0; i < 10; i++) {
+                double a0 = Math.PI * i / 10, a1 = Math.PI * (i + 1) / 10;
+                float x0 = 0.53f * (float) Math.cos(a0), y0 = 1.12f + 0.42f * (float) Math.sin(a0);
+                float x1 = 0.53f * (float) Math.cos(a1), y1 = 1.12f + 0.42f * (float) Math.sin(a1);
+                float[] p0 = {x0, y0, z}, p1 = {x1, y1, z}, p2 = {x1, y1 - 0.035f, z + 0.03f}, p3 = {x0, y0 - 0.035f, z + 0.03f};
+                mb.quad(p0, p1, p2, p3, new float[]{0, 1.1f, z}, fr);
+            }
+        }
+        return mb.build();
+    }
+
+    /** A racing steering wheel in its own frame: rim in the x-y plane, facing +z. */
+    private static Mesh buildWheel() {
+        MeshBuilder mb = new MeshBuilder();
+        int seg = 20;
+        float r = WHEEL_R;
+        for (int i = 0; i < seg; i++) {
+            double a0 = 2 * Math.PI * i / seg, a1 = 2 * Math.PI * (i + 1) / seg;
+            double am = (a0 + a1) / 2;
+            float len = (float) (2 * r * Math.sin(Math.PI / seg)) + 0.004f;
+            // a short box tangent to the rim (rotY only, so build it from quads instead)
+            float cx = r * (float) Math.cos(am), cy = r * (float) Math.sin(am);
+            float tx = -(float) Math.sin(am), ty = (float) Math.cos(am);
+            float nx = (float) Math.cos(am), ny = (float) Math.sin(am);
+            float t = 0.016f;
+            float[][] c = new float[8][];
+            for (int k = 0; k < 8; k++) {
+                float u = ((k & 1) == 0 ? -0.5f : 0.5f) * len, v = ((k & 2) == 0 ? -1 : 1) * t, w = ((k & 4) == 0 ? -1 : 1) * t;
+                c[k] = new float[]{cx + tx * u + nx * v, cy + ty * u + ny * v, w};
+            }
+            float[] col = (i % 5 == 0) ? new float[]{0.75f, 0.1f, 0.08f} : new float[]{0.06f, 0.06f, 0.07f};
+            float[] ref = {0, 0, 0};
+            mb.quad(c[0], c[1], c[3], c[2], ref, col);
+            mb.quad(c[4], c[5], c[7], c[6], ref, col);
+            mb.quad(c[0], c[1], c[5], c[4], ref, col);
+            mb.quad(c[2], c[3], c[7], c[6], ref, col);
+        }
+        // three spokes and the hub
+        mb.box(0, 0, -0.01f, 0.32f, 0.03f, 0.015f, 0, 0.35f, 0.35f, 0.37f);
+        mb.box(0, -0.085f, -0.01f, 0.03f, 0.17f, 0.015f, 0, 0.35f, 0.35f, 0.37f);
+        mb.sphere(0, 0, 0, 0.045f, 0.045f, 0.02f, 12, 4, 0.2f, 0.2f, 0.22f);
+        return mb.build();
+    }
+
+    /** A unit cube centred on the origin (white: tinted by vertex colour of the caller). */
+    private static Mesh buildSegment2() {
+        MeshBuilder mb = new MeshBuilder();
+        mb.box(0, 0, 0, 1f, 1f, 1f, 0, 0.82f, 0.18f, 0.12f);
+        return mb.build();
     }
 
     static float[] normalize(float x, float y, float z) {
@@ -114,6 +405,7 @@ final class Scenery {
      * wet band at the waterline and the pebbly lake bed from the height.
      */
     private static float[] groundColor(float x, float z, float h, float ny) {
+        h /= World.scale;   // thresholds below are for the RC-scale landscape
         float q = World.lakeQ(x, z);
         float ix = (x - World.ISLAND_X) / World.ISLAND_RX, iz = (z - World.ISLAND_Z) / World.ISLAND_RZ;
         boolean nearWater = q < 1.2f || (ix * ix + iz * iz) < 1f;
@@ -130,13 +422,13 @@ final class Scenery {
     private Mesh buildTerrain() {
         int cells = 180;
         int n = cells + 1;
-        float size = World.TERRAIN_HALF * 2;
+        float size = World.terrainHalf() * 2;
         float step = size / cells;
         float[] data = new float[n * n * Mesh.FLOATS];
         for (int j = 0; j < n; j++) {
             for (int i = 0; i < n; i++) {
-                float x = -World.TERRAIN_HALF + i * step;
-                float z = -World.TERRAIN_HALF + j * step;
+                float x = -World.terrainHalf() + i * step;
+                float z = -World.terrainHalf() + j * step;
                 float h = World.baseHeight(x, z);
                 float e = step * 0.5f;
                 float gx = (World.baseHeight(x + e, z) - World.baseHeight(x - e, z)) / (2 * e);
@@ -169,14 +461,14 @@ final class Scenery {
     private Mesh buildWater() {
         int cells = 144;
         int n = cells + 1;
-        float size = World.TERRAIN_HALF * 2;
+        float size = World.terrainHalf() * 2;
         float step = size / cells;
         float[] data = new float[n * n * Mesh.FLOATS];
         for (int j = 0; j < n; j++) {
             for (int i = 0; i < n; i++) {
                 int o = (j * n + i) * Mesh.FLOATS;
-                data[o] = -World.TERRAIN_HALF + i * step;
-                data[o + 2] = -World.TERRAIN_HALF + j * step;
+                data[o] = -World.terrainHalf() + i * step;
+                data[o + 2] = -World.terrainHalf() + j * step;
                 data[o + 4] = 1f;
             }
         }

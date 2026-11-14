@@ -99,11 +99,11 @@ final class TextureGen {
     static byte[] depth(boolean island) {
         int n = DEPTH_N;
         byte[] out = new byte[n * n];
-        float size = World.TERRAIN_HALF * 2;
+        float size = World.terrainHalf() * 2;
         for (int y = 0; y < n; y++) {
             for (int x = 0; x < n; x++) {
-                float wx = -World.TERRAIN_HALF + (x + 0.5f) / n * size;
-                float wz = -World.TERRAIN_HALF + (y + 0.5f) / n * size;
+                float wx = -World.terrainHalf() + (x + 0.5f) / n * size;
+                float wz = -World.terrainHalf() + (y + 0.5f) / n * size;
                 float d = -World.height(wx, wz, island) / DEPTH_SCALE;
                 out[y * n + x] = (byte) Math.round(Math.max(0f, Math.min(1f, d)) * 255f);
             }

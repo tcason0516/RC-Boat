@@ -235,12 +235,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private static final String WATER_VS = """
             uniform mat4 uVP;
             uniform float uTime;
+            uniform float uWaveAmp;
             attribute vec3 aPos;
             varying vec3 vWorld;
             void main() {
               vec3 p = aPos;
-              p.y = 0.035 * sin(p.x * 0.9 + uTime * 1.6) + 0.025 * sin(p.z * 1.3 - uTime * 1.9)
-                  + 0.015 * sin((p.x + p.z) * 2.1 + uTime * 2.7);
+              p.y = uWaveAmp * (0.035 * sin(p.x * 0.9 + uTime * 1.6) + 0.025 * sin(p.z * 1.3 - uTime * 1.9)
+                  + 0.015 * sin((p.x + p.z) * 2.1 + uTime * 2.7));
               vWorld = p;
               gl_Position = uVP * vec4(p, 1.0);
             }
@@ -260,6 +261,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             uniform sampler2D uShadow;
             uniform mat4 uLightVPF;
             uniform float uTexelF;
+            uniform float uDepthSpan;
+            uniform float uDetailDist;
             varying vec3 vWorld;
             void main() {
               float x = vWorld.x, z = vWorld.z, t = uTimeF;
@@ -271,7 +274,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
               vec4 a = texture2D(uNormalMap, vWorld.xz * 0.045 + vec2(t * 0.010, t * 0.006));
               vec4 b = texture2D(uNormalMap, vWorld.xz * 0.11 + vec2(-t * 0.008, t * 0.013));
               vec2 ripple = (a.rg * 2.0 - 1.0) + (b.rg * 2.0 - 1.0);
-              float detail = 0.28 * clamp(1.0 - dist / 140.0, 0.35, 1.0);
+              float detail = 0.28 * clamp(1.0 - dist / uDetailDist, 0.35, 1.0);
               vec3 n = normalize(vec3(-dx + ripple.x * detail, 1.0, -dz + ripple.y * detail));
               float ndv = max(dot(n, v), 0.0);
               float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
@@ -282,7 +285,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                                 + texture2D(uReflect, clamp(suv - bl * vec2(1.0, 0.4), 0.002, 0.998)).rgb
                                 + texture2D(uReflect, clamp(suv + bl * vec2(-0.4, 1.0), 0.002, 0.998)).rgb
                                 + texture2D(uReflect, clamp(suv - bl * vec2(-0.4, 1.0), 0.002, 0.998)).rgb);
-              float depth = texture2D(uDepth, vWorld.xz / 360.0 + 0.5).r * 4.0;
+              float depth = texture2D(uDepth, vWorld.xz / uDepthSpan + 0.5).r * 4.0;
               float sunN = max(dot(n, uLight), 0.0);
               vec3 body = mix(vec3(0.17, 0.43, 0.37), vec3(0.025, 0.11, 0.15), smoothstep(0.0, 2.6, depth));
               body *= 0.55 + 0.55 * sunN * sh;
@@ -349,13 +352,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private static final String PART_FS = FS_HEADER + """
             uniform vec3 uPColor;
             uniform float uNoiseAmt;
+            uniform float uNoiseScale;
             uniform sampler2D uNoise;
             varying vec3 vExtra;
             varying vec2 vXZ;
             void main() {
               float d = length(vExtra.xy);
               float shape = 1.0 - smoothstep(0.3, 1.0, d);
-              float nz = texture2D(uNoise, vXZ * 0.9).r;
+              float nz = texture2D(uNoise, vXZ * 0.9 * uNoiseScale + vExtra.xy * 0.15).r;
               float a = shape * vExtra.z * mix(1.0, smoothstep(0.25, 0.7, nz) * 2.6, uNoiseAmt);
               gl_FragColor = vec4(uPColor, clamp(a, 0.0, 1.0));
             }
@@ -365,7 +369,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     private final Game game;
     private final android.content.Context context;
-    private Scenery scene;
+    private Scenery scene, rcScene, lifeScene;
+    private int texDepthLife;
+    /** This frame: life-size world, and the player's cockpit view in it. */
+    private boolean lifeNow, cockpitView;
+    private int playerIdx = -1;
+    private float wheelAngle;
+    private final float[] boatFx = new float[Game.COLORS.length];
+    private int wWaveAmp, wDepthSpan, wDetailDist, pNoiseScale;
     // terrain program
     private int terProg, tPos, tNormal, tColor, tMVP, tModel, tLightVP, tTint, tLight, tCam, tFogColor,
             tFogDensity, tShadowOn, tTexel, tClip, tNoise, tGrassA, tGrassB, tSand, tRock, tPebble, tShadow;
@@ -514,6 +525,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         wReflect = GLES20.glGetUniformLocation(waterProg, "uReflect");
         wNormalMap = GLES20.glGetUniformLocation(waterProg, "uNormalMap");
         wDepth = GLES20.glGetUniformLocation(waterProg, "uDepth");
+        wWaveAmp = GLES20.glGetUniformLocation(waterProg, "uWaveAmp");
+        wDepthSpan = GLES20.glGetUniformLocation(waterProg, "uDepthSpan");
+        wDetailDist = GLES20.glGetUniformLocation(waterProg, "uDetailDist");
         wNoise = GLES20.glGetUniformLocation(waterProg, "uNoise");
         wShadow = GLES20.glGetUniformLocation(waterProg, "uShadow");
         wLightVP = GLES20.glGetUniformLocation(waterProg, "uLightVPF");
@@ -526,6 +540,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         pColor = GLES20.glGetUniformLocation(partProg, "uPColor");
         pNoiseAmt = GLES20.glGetUniformLocation(partProg, "uNoiseAmt");
         pNoise = GLES20.glGetUniformLocation(partProg, "uNoise");
+        pNoiseScale = GLES20.glGetUniformLocation(partProg, "uNoiseScale");
 
         GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
         texNoise = texture(TextureGen.noise(), TextureGen.NOISE_N, GLES20.GL_LUMINANCE, true);
@@ -550,7 +565,10 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         texSky = loadTexture("tex/sky.jpg", false, 0x8A, 0xA8, 0xD6);
         reflFbo = 0;
 
-        scene = new Scenery(game);
+        rcScene = new Scenery(game, false);
+        lifeScene = null;
+        texDepthLife = 0;
+        scene = rcScene;
         java.util.Arrays.fill(gates, null);
         java.util.Arrays.fill(kits, null);
         bakeShadows();
@@ -676,6 +694,15 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             time = game.time;
             boatCount = game.boats.length;
             track = game.track;
+            lifeNow = game.lifeSize;
+            playerIdx = -1;
+            for (int i = 0; i < boatCount; i++) if (game.boats[i].isPlayer) playerIdx = i;
+            cockpitView = lifeNow && game.state != Game.State.MENU && game.view == Game.VIEW_FPV && playerIdx >= 0;
+            if (playerIdx >= 0) {
+                // the wheel follows the player's steering, smoothed like real hands
+                float target = -game.boats[playerIdx].steer * 100f;
+                wheelAngle += (target - wheelAngle) * Math.min(1f, dt * 8f);
+            }
             islandOn = game.islandVisible();
             boolean shore = game.state != Game.State.MENU && game.view == Game.VIEW_SHORE;
             for (int i = 0; i < boatCount; i++) {
@@ -683,6 +710,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 b.modelMatrix(boatM[i], time);
                 boatColor[i] = b.id;
                 boatHull[i] = b.hull;
+                boatFx[i] = b.fx;
                 boatPose[i][0] = b.x;
                 boatPose[i][1] = b.z;
                 boatPose[i][2] = b.heading;
@@ -717,11 +745,25 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             }
             sprayCount = n;
         }
-        if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
-        if (track.impba && kits[track.id] == null) kits[track.id] = Scenery.buildCourseKit(track);
+        if (lifeNow && lifeScene == null) {
+            // first visit to the big lake: build it (and its depth map) once
+            lifeScene = new Scenery(game, true);
+            synchronized (World.class) {
+                float old = World.scale;
+                World.scale = World.LIFE_SCALE;
+                try {
+                    texDepthLife = texture(TextureGen.depth(false), TextureGen.DEPTH_N, GLES20.GL_LUMINANCE, false);
+                } finally { World.scale = old; }
+            }
+        }
+        scene = lifeNow ? lifeScene : rcScene;
+        if (!track.life) {
+            if (gates[track.id] == null) gates[track.id] = Scenery.buildGate(track);
+            if (track.impba && kits[track.id] == null) kits[track.id] = Scenery.buildCourseKit(track);
+        }
         fillShadows();
 
-        Matrix.perspectiveM(proj, 0, cam[9], aspect, cam[10], 700f);
+        Matrix.perspectiveM(proj, 0, cam[9], aspect, cam[10], lifeNow ? 6500f : 700f);
         Matrix.setLookAtM(view, 0, cam[0], cam[1], cam[2], cam[3], cam[4], cam[5], cam[6], cam[7], cam[8]);
         Matrix.multiplyMM(vp, 0, proj, 0, view, 0);
 
@@ -772,17 +814,17 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(uCam, cx, cy, cz);
         GLES20.glUniform3f(uFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
-        GLES20.glUniform1f(uFogDensity, FOG_DENSITY);
+        GLES20.glUniform1f(uFogDensity, fogDensity());
         GLES20.glUniform1f(uClip, reflection ? 1f : 0f);
         GLES20.glUniform1f(uAlpha, 1f);
         GLES20.glUniformMatrix4fv(uLightVP, 1, false, lightVP, 0);
-        GLES20.glUniform1f(uShadowOn, shadowOk ? 1f : 0f);
+        GLES20.glUniform1f(uShadowOn, shadowsOn() ? 1f : 0f);
         GLES20.glUniform1f(uTexel, 1f / Math.max(1, shadowSize));
         GLES20.glUniform1f(uTimeV, time);
         GLES20.glUniform1f(uSway, 0f);
         bindTex(0, texNoise, uNoiseL);
         bindTex(1, texAtlas, uAtlasL);
-        bindTex(2, shadowOk ? shadowTex : texWhite, uShadowL);
+        bindTex(2, shadowsOn() ? shadowTex : texWhite, uShadowL);
 
         // photo-textured timber, bark and boulders (triplanar)
         Matrix.setIdentityM(model, 0);
@@ -819,7 +861,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         }
         material(0.35f, 40f, false);
         if (!track.impba) drawLit(gates[track.id]);
-        else {
+        else if (!track.life) {
             if (kits[track.id] != null) drawLit(kits[track.id]);
             drawClock();
         }
@@ -827,7 +869,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         // RC drivers on the platform
         material(0.15f, 12f, false);
         for (int i = 0; i < boatCount; i++) {
-            if (!figureVisible[i]) continue;
+            if (!figureVisible[i] || lifeNow) continue;
             Matrix.setIdentityM(model, 0);
             Matrix.translateM(model, 0, figure[i][0], figure[i][1], figure[i][2]);
             Matrix.rotateM(model, 0, figure[i][3], 0, 1, 0);
@@ -845,6 +887,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             Matrix.translateM(model, 0, bu[0], wy, bu[1]);
             float tilt = (float) Math.sin(time * 1.3f + i) * 4f + w * 25f * (float) Math.sin(time * 9f + i);
             Matrix.rotateM(model, 0, tilt, (float) Math.cos(i), 0, (float) Math.sin(i));
+            if (track.buoyScale != 1f) Matrix.scaleM(model, 0, track.buoyScale, track.buoyScale, track.buoyScale);
             int type = (int) bu[2];
             drawLit(type == Track.BUOY_LEFT ? scene.buoyRed : type == Track.BUOY_RIGHT ? scene.buoyYellow
                     : type == Track.BUOY_TURN ? scene.buoyTurn : scene.buoyPlain);
@@ -854,7 +897,19 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         material(0.9f, 90f, false);
         for (int i = 0; i < boatCount; i++) {
             System.arraycopy(boatM[i], 0, model, 0, 16);
-            drawLit(scene.boats[boatHull[i]][boatColor[i]]);
+            Mesh m = scene.boats[boatHull[i]][boatColor[i]];
+            if (m != null) drawLit(m);
+            if (boatHull[i] == Boat.UNLIMITED && lifeScene != null) {
+                boolean mine = cockpitView && i == playerIdx;
+                if (!mine) {
+                    material(1.0f, 120f, false);
+                    drawLit(lifeScene.lifeCanopy);
+                    material(0.9f, 90f, false);
+                } else if (!reflection) {
+                    drawCockpit(i);
+                    material(0.9f, 90f, false);
+                }
+            }
         }
 
         // "this is you" marker above the player's boat (shore view only)
@@ -877,9 +932,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform3f(tLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(tCam, cx, cy, cz);
         GLES20.glUniform3f(tFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
-        GLES20.glUniform1f(tFogDensity, FOG_DENSITY);
+        GLES20.glUniform1f(tFogDensity, fogDensity());
         GLES20.glUniform1f(tClip, reflection ? 1f : 0f);
-        GLES20.glUniform1f(tShadowOn, shadowOk ? 1f : 0f);
+        GLES20.glUniform1f(tShadowOn, shadowsOn() ? 1f : 0f);
         GLES20.glUniform1f(tTexel, 1f / Math.max(1, shadowSize));
         GLES20.glUniform3f(tTint, 1f, 1f, 1f);
         GLES20.glUniformMatrix4fv(tLightVP, 1, false, lightVP, 0);
@@ -889,7 +944,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         bindTex(3, texSand, tSand);
         bindTex(4, texRock, tRock);
         bindTex(5, texPebble, tPebble);
-        bindTex(6, shadowOk ? shadowTex : texWhite, tShadow);
+        bindTex(6, shadowsOn() ? shadowTex : texWhite, tShadow);
         Matrix.setIdentityM(model, 0);
         GLES20.glUniformMatrix4fv(tMVP, 1, false, curVP, 0);
         GLES20.glUniformMatrix4fv(tModel, 1, false, model, 0);
@@ -911,13 +966,16 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniform3f(wCam, cam[0], cam[1], cam[2]);
         GLES20.glUniform3f(wLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
         GLES20.glUniform3f(wFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
-        GLES20.glUniform1f(wFogDensity, FOG_DENSITY);
+        GLES20.glUniform1f(wFogDensity, fogDensity());
+        GLES20.glUniform1f(wWaveAmp, lifeNow ? 0f : 1f);
+        GLES20.glUniform1f(wDepthSpan, World.TERRAIN_HALF * 2f * (lifeNow ? World.LIFE_SCALE : 1f));
+        GLES20.glUniform1f(wDetailDist, lifeNow ? 700f : 140f);
         GLES20.glUniform2f(wScreen, screenW, screenH);
         bindTex(0, texNoise, wNoise);
         bindTex(1, texWaterNormals, wNormalMap);
-        bindTex(2, islandOn ? texDepthIsland : texDepthNoIsland, wDepth);
+        bindTex(2, lifeNow ? texDepthLife : islandOn ? texDepthIsland : texDepthNoIsland, wDepth);
         bindTex(3, reflOk ? reflTex : texBlack, wReflect);
-        bindTex(4, shadowOk ? shadowTex : texWhite, wShadow);
+        bindTex(4, shadowsOn() ? shadowTex : texWhite, wShadow);
         GLES20.glUniformMatrix4fv(wLightVP, 1, false, lightVP, 0);
         GLES20.glUniform1f(wTexel, 1f / Math.max(1, shadowSize));
         scene.water.draw(wPos, -1, -1);
@@ -932,6 +990,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniformMatrix4fv(pVP, 1, false, vp, 0);
         GLES20.glUniform3f(pColor, r, g, b);
         GLES20.glUniform1f(pNoiseAmt, noiseAmt);
+        GLES20.glUniform1f(pNoiseScale, lifeNow ? 0.13f : 1f);
         bindTex(0, texNoise, pNoise);
         buf.position(0);
         GLES20.glEnableVertexAttribArray(pPos);
@@ -1043,6 +1102,76 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         material(0.35f, 40f, false);
     }
 
+    private float fogDensity() { return lifeNow ? FOG_DENSITY * 0.17f : FOG_DENSITY; }
+
+    /** The baked sun shadows only cover the RC lake. */
+    private boolean shadowsOn() { return shadowOk && !lifeNow; }
+
+    private final float[] tmpA = new float[16], tmpB = new float[16];
+    private final float[] hand = new float[4], handW = new float[4];
+
+    /**
+     * Life-size cockpit view: dash, canopy frame and seat, the steering wheel turning with
+     * the player's steering, and the driver's arms reaching to gloved hands on the rim.
+     */
+    private void drawCockpit(int i) {
+        float[] bm = boatM[i];
+        material(0.25f, 20f, false);
+        System.arraycopy(bm, 0, model, 0, 16);
+        drawLit(lifeScene.cockpit);
+        // the wheel: at its hub, tilted back towards the driver, turned by the steering
+        float[] W = Scenery.WHEEL;
+        Matrix.setIdentityM(tmpA, 0);
+        Matrix.translateM(tmpA, 0, W[0], W[1], W[2]);
+        Matrix.rotateM(tmpA, 0, -(90f - Scenery.WHEEL_TILT), 1, 0, 0);
+        Matrix.rotateM(tmpA, 0, wheelAngle, 0, 0, 1);
+        Matrix.multiplyMM(model, 0, bm, 0, tmpA, 0);
+        material(0.4f, 40f, false);
+        drawLit(lifeScene.wheel);
+        // hands at "ten to two" on the rim, turning with it
+        material(0.15f, 10f, false);
+        for (int s = -1; s <= 1; s += 2) {
+            double a = Math.toRadians(s < 0 ? 160 : 20);
+            hand[0] = Scenery.WHEEL_R * (float) Math.cos(a);
+            hand[1] = Scenery.WHEEL_R * (float) Math.sin(a);
+            hand[2] = 0.02f;
+            hand[3] = 1f;
+            Matrix.multiplyMV(handW, 0, tmpA, 0, hand, 0);   // boat coordinates
+            float[] sh = s < 0 ? Scenery.SHOULDER_L : Scenery.SHOULDER_R;
+            // elbow: between shoulder and hand, dropped and pushed outwards
+            float ex = (sh[0] + handW[0]) * 0.5f + s * 0.1f;
+            float ey = (sh[1] + handW[1]) * 0.5f - 0.1f;
+            float ez = (sh[2] + handW[2]) * 0.5f + 0.02f;
+            limb(bm, sh[0], sh[1], sh[2], ex, ey, ez, 0.075f);
+            limb(bm, ex, ey, ez, handW[0], handW[1], handW[2], 0.06f);
+            Matrix.setIdentityM(tmpB, 0);
+            Matrix.translateM(tmpB, 0, handW[0], handW[1], handW[2]);
+            Matrix.scaleM(tmpB, 0, 0.045f, 0.04f, 0.055f);
+            Matrix.multiplyMM(model, 0, bm, 0, tmpB, 0);
+            drawLit(lifeScene.glove);
+        }
+    }
+
+    /** A box of square cross-section th from point a to point b (boat coordinates). */
+    private void limb(float[] bm, float ax, float ay, float az, float bx, float by, float bz, float th) {
+        float dx = bx - ax, dy = by - ay, dz = bz - az;
+        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        float ux = dx / len, uy = dy / len, uz = dz / len;
+        // two unit vectors perpendicular to the limb
+        float px = uy * 0 - uz * 1, py = uz * 0 - ux * 0, pz = ux * 1 - uy * 0;   // u x (0,1,0)... fallback below
+        float pl = (float) Math.sqrt(px * px + py * py + pz * pz);
+        if (pl < 1e-3f) { px = 1; py = 0; pz = 0; pl = 1; }
+        px /= pl; py /= pl; pz /= pl;
+        float qx = uy * pz - uz * py, qy = uz * px - ux * pz, qz = ux * py - uy * px;
+        float[] m = tmpB;
+        m[0] = px * th; m[1] = py * th; m[2] = pz * th; m[3] = 0;
+        m[4] = ux * len; m[5] = uy * len; m[6] = uz * len; m[7] = 0;
+        m[8] = qx * th; m[9] = qy * th; m[10] = qz * th; m[11] = 0;
+        m[12] = (ax + bx) / 2; m[13] = (ay + by) / 2; m[14] = (az + bz) / 2; m[15] = 1;
+        Matrix.multiplyMM(model, 0, bm, 0, m, 0);
+        drawLit(lifeScene.unitBox);
+    }
+
     /** Soft dark ellipses under the boats and buoys, nudged away from the sun. */
     private void fillShadows() {
         shadowBuf.position(0);
@@ -1053,14 +1182,16 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             float fx = (float) -Math.sin(hd), fz = (float) -Math.cos(hd);
             float y = World.wave(x, z, time) + 0.04f;
             // half-length along the hull, half-width across it
-            quad(shadowBuf, x, y, z, fx * 0.85f, fz * 0.85f, -fz * 0.42f, fx * 0.42f, 0.5f);
+            float k = boatHull[i] == Boat.UNLIMITED ? 5.4f : boatFx[i];
+            quad(shadowBuf, x, y, z, fx * 0.85f * k, fz * 0.85f * k, -fz * 0.42f * k * 1.5f, fx * 0.42f * k * 1.5f, 0.5f);
             v += 6;
         }
         java.util.ArrayList<float[]> buoys = track.buoys;
         for (int i = 0; i < buoys.size() && v / 6 < Game.COLORS.length + 200; i++) {
             float[] bu = buoys.get(i);
             float x = bu[0] + sx * 0.3f, z = bu[1] + sz * 0.3f;
-            quad(shadowBuf, x, World.wave(x, z, time) + 0.04f, z, 0.6f, 0f, 0f, 0.6f, 0.38f);
+            float bs = track.buoyScale;
+            quad(shadowBuf, x, World.wave(x, z, time) + 0.04f, z, 0.6f * bs, 0f, 0f, 0.6f * bs, 0.38f);
             v += 6;
         }
         shadowVerts = v;

@@ -62,13 +62,17 @@ final class EngineSound implements Runnable {
                 beepPhase = 0;
             }
             boolean on = game.soundOn && game.engineOn;
-            boolean gas = game.power != Game.ELECTRIC;
+            boolean turbine = game.lifeSize;
+            boolean gas = game.power != Game.ELECTRIC && !turbine;
             boolean twin = game.power == Game.GAS_TWIN;
             float lvl = game.engineLevel, thr = game.engineThrottle;
             float targetVol = on ? (gas ? 0.16f + 0.14f * thr + 0.06f * lvl : 0.07f + 0.15f * thr + 0.06f * lvl) : 0f;
             if (game.talking) targetVol *= 0.2f;   // duck well under the announcers
             // gas: firing rate from ~2,800 rpm idle to ~16,000 rpm flat out
-            float targetFreq = gas ? 46f + 200f * lvl + 30f * thr : 110f + 520f * lvl + 90f * thr;
+            float targetFreq = turbine ? 520f + 1500f * lvl + 400f * thr
+                    : gas ? 46f + 200f * lvl + 30f * thr : 110f + 520f * lvl + 90f * thr;
+            if (turbine && on) targetVol = 0.14f + 0.12f * thr + 0.08f * lvl;
+            if (turbine && game.talking) targetVol *= 0.25f;
             boolean beepOn = game.soundOn;
             for (int i = 0; i < buf.length; i++) {
                 vol += (targetVol - vol) * 0.0015f;
@@ -82,7 +86,15 @@ final class EngineSound implements Runnable {
                 float hiss = rnd.nextFloat() * 2 - 1;
                 hissLp += (hiss - hissLp) * 0.25f;
                 float s;
-                if (gas) {
+                if (turbine) {
+                    // gas turbine: a whistling whine over a broad, rushing roar
+                    float whine = (float) Math.sin(phase * 2 * Math.PI) * 0.18f
+                            + (float) Math.sin(phase2 * 2 * Math.PI) * 0.07f;
+                    float k = 0.06f + 0.22f * thr + 0.12f * lvl;
+                    muff += (hiss - muff) * k;
+                    muff2 += (muff - muff2) * 0.05f;            // deep rumble
+                    s = (whine * (0.6f + 0.4f * lvl) + muff * 0.55f + muff2 * 1.6f) * vol;
+                } else if (gas) {
                     // each firing: a sharp exhaust pop that rings and decays
                     gp1 += freq / RATE;
                     if (gp1 > 1) gp1 -= 1;

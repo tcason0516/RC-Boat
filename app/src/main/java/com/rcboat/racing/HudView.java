@@ -99,12 +99,15 @@ final class HudView extends View {
 
     private void drawMenu(Canvas c, int w, int h) {
         releaseSticks();
+        if (game.menuScreen == Game.MENU_MAIN) { drawMainMenu(c, w, h); return; }
+        if (game.menuScreen == Game.MENU_LIFE) { drawLifeMenu(c, w, h); return; }
         float pw = Math.min(w * 0.94f, 190 * u), ph = 94 * u;
         float px = (w - pw) / 2f, py = (h - ph) / 2f;
         panel(c, px, py, pw, ph);
 
         textC(c, "RC BOAT RACING", w / 2f, py + 9 * u, 7 * u, Color.WHITE);
         final Game g = game;
+        backButton(c, px, py);
         Track tr = g.track;
         String line1 = tr.name + (tr.impba && tr.info.length() > 0 ? " (" + tr.info + ")" : "")
                 + (g.event != Game.EVENT_RACE ? "  \u2022  " + Game.EVENT_INFO[g.event] : "")
@@ -173,10 +176,96 @@ final class HudView extends View {
                 game::startRace);
     }
 
+    /** Top-left "back to the main menu" button of a settings menu. */
+    private void backButton(Canvas c, float px, float py) {
+        button(c, px + 3 * u, py + 3 * u, 20 * u, 8 * u, "\u2039 BACK", 0xFF35506A, 3.6f * u,
+                () -> game.menuScreen = Game.MENU_MAIN);
+    }
+
+    /** The first screen: RC boats or life-size Unlimited hydroplanes. */
+    private void drawMainMenu(Canvas c, int w, int h) {
+        float pw = Math.min(w * 0.9f, 170 * u), ph = 80 * u;
+        float px = (w - pw) / 2f, py = (h - ph) / 2f;
+        panel(c, px, py, pw, ph);
+        textC(c, "BOAT RACING", w / 2f, py + 12 * u, 8 * u, Color.WHITE);
+        textC(c, "Choose your racing", w / 2f, py + 19 * u, 3.6f * u, 0xFF9FD8FF);
+        float cw = (pw - 15 * u) / 2f, ch = 48 * u, cy = py + 25 * u;
+        final Game g = game;
+        modeCard(c, px + 5 * u, cy, cw, ch, "RC BOATS", "1/8 scale racing on the lake",
+                "IMPBA courses, classes and rules", 0xFF2E7D9E, () -> { g.setMode(false); g.menuScreen = Game.MENU_RC; });
+        modeCard(c, px + 10 * u + cw, cy, cw, ch, "LIFE SIZE", "Unlimited hydroplanes",
+                "Turbine power, 175+ mph, 2-mile courses", 0xFFB5482A,
+                () -> { g.setMode(true); g.menuScreen = Game.MENU_LIFE; });
+    }
+
+    private void modeCard(Canvas c, float x, float y, float cw, float ch, String title, String l1, String l2,
+                          int color, Action a) {
+        button(c, x, y, cw, ch, "", color, 4 * u, a);
+        textC(c, title, x + cw / 2f, y + ch * 0.42f, 7 * u, Color.WHITE);
+        textFit(c, l1, x + cw / 2f, y + ch * 0.62f, 3.6f * u, cw - 4 * u, 0xFFEAF4FA);
+        textFit(c, l2, x + cw / 2f, y + ch * 0.76f, 3.2f * u, cw - 4 * u, 0xFFD0E4F0);
+    }
+
+    /** Settings for life-size racing. */
+    private void drawLifeMenu(Canvas c, int w, int h) {
+        float pw = Math.min(w * 0.94f, 190 * u), ph = 94 * u;
+        float px = (w - pw) / 2f, py = (h - ph) / 2f;
+        panel(c, px, py, pw, ph);
+        textC(c, "LIFE SIZE HYDROPLANES", w / 2f, py + 9 * u, 6.5f * u, Color.WHITE);
+        final Game g = game;
+        backButton(c, px, py);
+        Track tr = g.track;
+        textFit(c, tr.name + " (" + tr.info + ")  \u2022  Unlimited hydroplane: turbine, ~175 mph",
+                w / 2f, py + 15.5f * u, 3.2f * u, pw - 8 * u, 0xFF9FD8FF);
+        textFit(c, Game.RULE_INFO[g.rules], w / 2f, py + 19.5f * u, 3.2f * u, pw - 8 * u, 0xFF9FD8FF);
+
+        float gap = 5 * u;
+        float colW = (pw - 6 * u - gap) / 2f;
+        float x0 = px + 3 * u, x1 = x0 + colW + gap;
+        float rowH = 8.8f * u;
+        float y0 = py + 27 * u;
+        heading(c, x0, py + 24.2f * u, colW, "RACE");
+        heading(c, x1, py + 24.2f * u, colW, "OPTIONS");
+        int nS = Game.START_NAMES.length;
+        String len = g.timed() ? "5 min" : g.laps + (g.laps == 1 ? " lap" : " laps");
+        row(c, x0, y0, colW, rowH, "Course", tr.name.replace(" Course", ""),
+                () -> stepTrack(g, -1), () -> stepTrack(g, 1));
+        row(c, x0, y0 + rowH, colW, rowH, "Length", len,
+                () -> g.laps = g.laps <= 1 ? Game.TIMED : (g.timed() ? 9 : g.laps - 1),
+                () -> g.laps = g.timed() ? 1 : (g.laps >= 9 ? Game.TIMED : g.laps + 1));
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", String.valueOf(g.opponents),
+                () -> g.opponents = Math.max(0, g.opponents - 1),
+                () -> g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1));
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+                () -> g.difficulty = Math.max(0, g.difficulty - 1),
+                () -> g.difficulty = Math.min(2, g.difficulty + 1));
+        row(c, x0, y0 + 4 * rowH, colW, rowH, "Start", Game.START_NAMES[g.startMode],
+                () -> g.startMode = RaceClass.step(g.startMode, -1, nS, g::startOk),
+                () -> g.startMode = RaceClass.step(g.startMode, 1, nS, g::startOk));
+        row(c, x0, y0 + 5 * rowH, colW, rowH, "Buoy rule", Game.RULE_NAMES[g.rules],
+                () -> g.rules = (g.rules + 2) % 3, () -> g.rules = (g.rules + 1) % 3);
+        row(c, x1, y0, colW, rowH, "Camera", g.view == Game.VIEW_FPV ? "Cockpit" : "Chase",
+                () -> g.view = g.view == Game.VIEW_FPV ? Game.VIEW_CHASE : Game.VIEW_FPV,
+                () -> g.view = g.view == Game.VIEW_FPV ? Game.VIEW_CHASE : Game.VIEW_FPV);
+        row(c, x1, y0 + rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+                () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
+        String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
+
+        float bw = 56 * u, bh = 10 * u;
+        button(c, (w - bw) / 2f, py + ph - bh - 2.5f * u, bw, bh, "START RACE", 0xFF2E9E4F, 5.2f * u,
+                game::startRace);
+    }
+
     /** Next track the class and event allow. */
     private static void stepTrack(Game g, int dir) {
         if (g.event == Game.EVENT_SPEED) return;   // speed runs use the 1/3-mile oval's straightaway
-        g.setTrack(RaceClass.step(g.trackId, dir, Track.COUNT, t -> RaceClass.trackOk(g.raceClass, t)));
+        if (g.lifeSize) {
+            g.setTrack(RaceClass.step(g.trackId, dir, Track.COUNT, t -> Track.inMode(t, true)));
+            return;
+        }
+        g.setTrack(RaceClass.step(g.trackId, dir, Track.COUNT,
+                t -> Track.inMode(t, false) && RaceClass.trackOk(g.raceClass, t)));
     }
 
     /** Sound: On -> No voice (no announcer) -> Off. */
@@ -300,7 +389,8 @@ final class HudView extends View {
         // ---- top buttons ----
         float bw = 15 * u, bh = 9 * u, gap = 2 * u;
         float bx = w / 2f - (bw * 3 + gap * 2) / 2f;
-        button(c, bx, 2 * u, bw, bh, Game.VIEW_SHORT[game.view], 0xCC24435E, 3.6f * u,
+        button(c, bx, 2 * u, bw, bh, game.lifeSize && game.view == Game.VIEW_FPV ? "COCKPIT"
+                : Game.VIEW_SHORT[game.view], 0xCC24435E, 3.6f * u,
                 game::toggleView);
         button(c, bx + bw + gap, 2 * u, bw, bh, "PAUSE", 0xCC24435E, 3.6f * u, () -> game.setPaused(true));
         final Game g = game;
@@ -436,7 +526,8 @@ final class HudView extends View {
     private void drawMinimap(Canvas c, float x, float y, float w, float h) {
         panel(c, x, y, w, h);
         Track t = game.track;
-        float minX = t.minX - 8, maxX = t.maxX + 8, minZ = t.minZ - 8, maxZ = t.maxZ + 8;
+        float pad = 8f * t.scaleK;
+        float minX = t.minX - pad, maxX = t.maxX + pad, minZ = t.minZ - pad, maxZ = t.maxZ + pad;
         float sc = Math.min((w - 4 * u) / (maxX - minX), (h - 4 * u) / (maxZ - minZ));
         float ox = x + w / 2f - (minX + maxX) / 2f * sc, oy = y + h / 2f - (minZ + maxZ) / 2f * sc;
         path.reset();
@@ -447,7 +538,7 @@ final class HudView extends View {
         }
         path.close();
         stroke.setColor(0x88FFFFFF);
-        stroke.setStrokeWidth(Track.HALF_WIDTH * 2 * sc);
+        stroke.setStrokeWidth(Math.max(1.5f * u, t.halfWidth * 2 * sc * (t.life ? 0.5f : 1f)));
         c.drawPath(path, stroke);
         // island
         if (game.islandVisible()) {
@@ -460,7 +551,8 @@ final class HudView extends View {
         stroke.setColor(Color.WHITE);
         stroke.setStrokeWidth(0.5f * u);
         float sx = ox + t.px[0] * sc, sy = oy + t.pz[0] * sc;
-        float gx = t.nx(0) * Track.HALF_WIDTH * sc, gz = t.nz(0) * Track.HALF_WIDTH * sc;
+        float gw = Math.max(t.halfWidth * sc, 2f * u);
+        float gx = t.nx(0) * gw, gz = t.nz(0) * gw;
         c.drawLine(sx - gx, sy - gz, sx + gx, sy + gz, stroke);
         // spectator
         if (game.view == Game.VIEW_SHORE) {

@@ -13,6 +13,14 @@ opponents around a buoy-marked course on a lake, with a lighthouse island in the
 Every push to `main` rebuilds the APK automatically (see the *Actions* tab) and updates
 that release. New builds install over the old one.
 
+## Two kinds of racing
+
+The main menu offers **RC Boats** (everything below) and **Life Size**: full-scale turbine
+Unlimited hydroplanes (~31 ft, about 170 mph) on a big lake in the hills, on 1.5, 2 and
+2.5 mile courses run counter-clockwise, with a grandstand, judges' tower and pits by the
+start. Drive from the **cockpit** (dash, steering wheel and the driver's arms on it, turning
+as you steer) or the **chase** camera. Each settings menu has a Back button.
+
 ## How to play
 
 - **Two sticks (default):** left stick = throttle (up forward, down reverse/brake),

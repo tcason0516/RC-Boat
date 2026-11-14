@@ -11,6 +11,10 @@ is baked for each wheel angle from -60 to +60 degrees in 10 degree steps; the ga
 between neighbours. Dressing: fire-suit sleeve, knitted cuff, gauntlet
 glove with a darker palm (material ids, coloured by the game).
 
+The grip: the fist is closed round a bar the size of the gloved rim (each finger bone turned
+until it lands on the bar), the rim is put through the fist's hollow, and the fist is rolled
+round the rim so the back of the hand faces the driver.
+
 Usage: python3 build_arms.py MH_DIR OUT_FILE [DEBUG_DIR]
 """
 import json, struct, sys, math
@@ -26,9 +30,10 @@ HAND_ANGLE = {+1: 20.0, -1: 160.0}
 ANGLES = list(range(-60, 61, 10))
 SCALE = 0.1 * 1.1 
 STRETCH = 1.2          # the base mesh has short arms; lengthen upper arm and forearm only
-KNUCK = (1.0, 2.0)     # knuckle offset from the rim centre: out, forward (in rim radii)
-FLEX = 1.4
-M_TILT = 0.3
+ROLL = -40.0           # roll of the fist round the rim (degrees): the back of the hand turns to face the driver
+THUMB_ALONG = 0.035    # how far along the rim (towards twelve) the thumb tip reaches
+FINGER_HALF = 0.0085   # half a finger's thickness (centre line to skin)
+BAR_BACK = 0.015       # where the rim crosses the palm: this far behind the knuckles
          # MakeHuman units are decimetres; scale to a large adult's arm
 
 # material ids
@@ -182,96 +187,7 @@ class Arm:
         return m, k, n
 
 
-def pose(arm, wheel_angle):
-    s = arm.side
-    # wheel frame and the hand's frame on the rim
-    Wf = rot_x(-(90 - WHEEL_TILT))
-    a = wheel_angle + HAND_ANGLE[s]
-    Hf = Wf @ rot_z(a)
-    X, Y, Z = Hf[:, 0], Hf[:, 1], Hf[:, 2]      # radial out, tangent (CCW), towards driver
-    grip = WHEEL + Hf @ np.array([WHEEL_R, 0, 0])
-    up_t = Y if s > 0 else -Y                    # along the rim towards twelve o'clock
-    # target hand frame: back of the hand faces the driver and a little inwards; the
-    # metacarpals point in across the rim; knuckles line up along the rim (thumb side up)
-    # a real grip: the palm wraps the outside of the rim, so the metacarpals run from the
-    # wrist (out and towards the driver) to the knuckles on the far, outer edge of the rim
-    m_t = -X * M_TILT - Z * 1.0; m_t /= np.linalg.norm(m_t)
-    k_t = -up_t
-    m0, k0, n0 = arm.palm_side()
-    Rh = align(m0, k0, m_t, k_t)
-    n_t = Rh @ n0
-    # knuckles sit just outside and in front of the rim
-    knuck = grip + X * (GRIP_T * KNUCK[0]) - Z * (GRIP_T * KNUCK[1])
-    W = knuck - Rh @ (arm.h("finger3-1") - arm.h("wrist"))
-    # arm: shoulder -> elbow -> wrist with the rest bone lengths
-    S0, E0, W0 = arm.h("upperarm01"), arm.h("lowerarm01"), arm.h("wrist")
-    la, lb = np.linalg.norm(E0 - S0) * STRETCH, np.linalg.norm(W0 - E0) * STRETCH
-    S = SHOULDER[s]
-    d = W - S; dl = np.linalg.norm(d); u = d / dl
-    dc = min(max(dl, 0.05), la + lb - 1e-4)
-    along = (la * la - lb * lb + dc * dc) / (2 * dc)
-    hgt = math.sqrt(max(0.0, la * la - along * along))
-    pole = np.array([0.8 * s, -1.0, 0.25]); pole -= np.dot(pole, u) * u; pole /= np.linalg.norm(pole)
-    if dl > (la + lb) * 0.96:                    # out of reach: the shoulder leans in
-        S = S + u * (dl - (la + lb) * 0.96)
-        d = W - S; dl = np.linalg.norm(d); dc = dl
-        along = (la * la - lb * lb + dc * dc) / (2 * dc)
-        hgt = math.sqrt(max(0.0, la * la - along * along))
-    E = S + u * along + pole * hgt
-    arm.reach = dl / (la + lb)
-    up0, fo0 = E0 - S0, W0 - E0
-    up1, fo1 = E - S, W - E
-    bend0, bend1 = np.cross(up0, fo0), np.cross(up1, fo1)
-    Ru = align(up0, bend0, up1, bend1)
-    # forearm: point along the forearm and twist so the wrist lines up with the hand
-    Rl_bend = align(fo0, bend0, fo1, bend1)
-    Rl_twist = align(fo0, k0, fo1, k_t)
-    Rl1 = slerp(Rl_bend, Rl_twist, 0.45)
-    Rl2 = Rl_twist
-    def stretch(v):
-        v = v / np.linalg.norm(v)
-        return np.eye(3) + (STRETCH - 1) * np.outer(v, v)
-    Su, Sl = stretch(up0), stretch(fo0)
-    Ru_s, Rl1_s, Rl2_s = Ru @ Su, Rl1 @ Sl, Rl2 @ Sl
-    R = {"shoulder01": Ru, "upperarm01": Ru_s, "upperarm02": Ru_s, "lowerarm01": Rl1_s, "lowerarm02": Rl2_s,
-         "wrist": Rh}
-    P = {"shoulder01": S + Ru @ (arm.h("shoulder01") - S0), "upperarm01": S,
-         "upperarm02": S + Ru_s @ (arm.h("upperarm02") - S0), "lowerarm01": E,
-         "lowerarm02": E + Rl1_s @ (arm.h("lowerarm02") - E0), "wrist": W}
-    # fingers: each joint flexes about the knuckle line, towards the palm
-    flex = {2: (62, 72, 48), 3: (66, 78, 50), 4: (68, 80, 50), 5: (70, 82, 48)}
-    for f in range(2, 6):
-        mc = "metacarpal%d" % (f - 1)
-        R[mc] = Rh; P[mc] = W + Rh @ (arm.h(mc) - W0)
-        parentR, parentP, parentH = Rh, W, W0
-        axis = np.cross(n_t, m_t)              # flexing turns the finger from m towards -n
-        for k in range(1, 4):
-            b = "finger%d-%d" % (f, k)
-            hp = parentP + parentR @ (arm.h(b) - parentH) if k > 1 else W + Rh @ (arm.h(b) - W0)
-            ang = math.radians(FLEX * sum(flex[f][:k]))
-            Rb = axis_angle(axis, ang) @ Rh
-            # make sure the flex goes towards the palm
-            tip_dir = Rb @ (arm.t(b) - arm.h(b))
-            if k == 1 and np.dot(tip_dir, n_t) > 0:
-                axis = -axis; Rb = axis_angle(axis, ang) @ Rh
-            R[b], P[b] = Rb, hp
-            parentR, parentP, parentH = Rb, hp, arm.h(b)
-    # thumb: along the front of the rim towards twelve o'clock, tip curling over it
-    th0 = arm.t("finger1-1") - arm.h("finger1-1")
-    t_dir = up_t * 0.75 - X * 0.45 + Z * 0.2; t_dir /= np.linalg.norm(t_dir)
-    Rt1 = align(Rh @ th0, n_t, t_dir, Z) @ Rh
-    parentR, parentP, parentH = Rt1, W + Rh @ (arm.h("finger1-1") - W0), arm.h("finger1-1")
-    R["finger1-1"], P["finger1-1"] = Rt1, parentP
-    taxis = np.cross(t_dir, Z)
-    for k, ang in ((2, 18), (3, 30)):
-        b = "finger1-%d" % k
-        hp = parentP + parentR @ (arm.h(b) - parentH)
-        Rb = axis_angle(taxis, math.radians(ang)) @ Rt1
-        if np.dot(Rb @ (arm.t(b) - arm.h(b)), Z) > np.dot(Rt1 @ (arm.t(b) - arm.h(b)), Z):
-            Rb = axis_angle(taxis, -math.radians(ang)) @ Rt1
-        R[b], P[b] = Rb, hp
-        parentR, parentP, parentH = Rb, hp, arm.h(b)
-    # skin
+def skin(arm, R, P):
     out = np.zeros_like(arm.rest)
     for i, ws in enumerate(arm.weights):
         acc = np.zeros(3)
@@ -280,6 +196,194 @@ def pose(arm, wheel_angle):
             acc += w * (R[bb] @ (arm.rest[i] - arm.head[b]) + P[bb])
         out[i] = acc
     return out
+
+
+def hand_rest(arm, flex):
+    """The hand closed into a fist, in the arm's rest frame (wrist unmoved): bone rotations
+    and joint positions for the metacarpals and fingers (not the thumb)."""
+    m0, k0, n0 = arm.palm_side()
+    W0 = arm.h("wrist")
+    R, P = {"wrist": np.eye(3)}, {"wrist": W0}
+    axis = np.cross(n0, m0)                    # turns m towards -n: towards the palm
+    curl = {2: (62, 72, 48), 3: (66, 78, 50), 4: (68, 80, 50), 5: (70, 82, 48)}
+    for f in range(2, 6):
+        mc = "metacarpal%d" % (f - 1)
+        R[mc], P[mc] = np.eye(3), arm.h(mc)
+        Rp, Pp, Hp = np.eye(3), W0, W0
+        for k in range(1, 4):
+            b = "finger%d-%d" % (f, k)
+            hp = Pp + Rp @ (arm.h(b) - Hp)
+            fl = flex[f] if isinstance(flex, dict) else flex
+            ang = fl[k - 1] if isinstance(fl, tuple) else fl * sum(curl[f][:k])
+            Rb = axis_angle(axis, math.radians(ang))
+            R[b], P[b] = Rb, hp
+            Rp, Pp, Hp = Rb, hp, arm.h(b)
+    return R, P
+
+
+def tunnel(arm, R, P):
+    """The hollow inside the fist (where the rim goes): its centre in the rest frame and
+    the radius of the largest bar that fits."""
+    m0, k0, n0 = arm.palm_side()
+    W0 = arm.h("wrist")
+    full = {b[:-2]: (np.eye(3), arm.head[b]) for b in arm.bones}
+    for b in R: full[b] = (R[b], P[b])
+    pts = skin(arm, {b: v[0] for b, v in full.items()}, {b: v[1] for b, v in full.items()})
+    hand = [i for i, ws in enumerate(arm.weights)
+            if sum(w for b, w in ws if b.startswith(("metacarpal", "finger2", "finger3", "finger4", "finger5"))) > 0.5]
+    q = pts[hand] - W0
+    kk = q @ k0
+    k_lo, k_hi = (arm.h("finger2-1") - W0) @ k0, (arm.h("finger5-1") - W0) @ k0
+    sel = (kk > min(k_lo, k_hi)) & (kk < max(k_lo, k_hi))
+    uv = np.stack([q[sel] @ m0, q[sel] @ n0], 1)
+    uv = uv[uv[:, 0] > 0.04]                     # leave out the wrist
+    best = (-1, None)
+    ku = (arm.h("finger3-1") - W0) @ m0         # the knuckles' distance from the wrist
+    for u in np.arange(ku - 0.05, ku + 0.03, 0.002):
+        for v in np.arange(-0.08, -0.004, 0.002):
+            d = uv - (u, v)
+            dist = np.hypot(d[:, 0], d[:, 1])
+            near = dist < 0.06
+            ang = np.arctan2(d[near, 1], d[near, 0])
+            if len(set(((ang + math.pi) / (2 * math.pi) * 12).astype(int) % 12)) < 8: continue
+            r = dist.min()
+            if r > best[0]: best = (r, (u, v))
+    r, (u, v) = best
+    c = W0 + m0 * u + n0 * v + k0 * (k_lo + k_hi) / 2
+    return c, r
+
+
+def fist(arm):
+    """Closes the hand round a bar the size of the gloved rim: the bar lies across the palm
+    just behind the knuckles, and each finger curls until it meets the bar."""
+    R_bar = GRIP_T + 0.0045                     # rim + glove leather + a little give
+    m0, k0, n0 = arm.palm_side()
+    W0 = arm.h("wrist")
+    ident = {b[:-2]: (np.eye(3), arm.head[b]) for b in arm.bones}
+
+    def posed(Rh, Ph):
+        full = dict(ident)
+        for b in Rh: full[b] = (Rh[b], Ph[b])
+        return skin(arm, {b: v[0] for b, v in full.items()}, {b: v[1] for b, v in full.items()})
+
+    def group(prefix):
+        return np.array([i for i, ws in enumerate(arm.weights)
+                         if sum(w for b, w in ws if b.startswith(prefix)) > 0.5])
+
+    def dist(pts, c):
+        d = pts - c
+        return np.linalg.norm(d - np.outer(d @ k0, k0), axis=1)
+
+    rest = arm.rest
+    palm = group("metacarpal")
+    palm = palm[(rest[palm] - W0) @ m0 > 0.03]
+    ku = (arm.h("finger3-1") - W0) @ m0
+    kmid = ((arm.h("finger2-1") - W0) @ k0 + (arm.h("finger5-1") - W0) @ k0) / 2
+    base = W0 + m0 * (ku - BAR_BACK) + k0 * kmid
+    v = 0.0
+    while dist(rest[palm], base - n0 * v).min() < R_bar: v += 0.0005
+    c = base - n0 * v
+    # each finger wraps the bar: every bone turns just far enough for its far end to
+    # land on the circle the finger's centre line follows round the bar
+    axis = np.cross(n0, m0)
+    Rw = R_bar + FINGER_HALF
+    flex = {}
+    for f in range(2, 6):
+        joints = [arm.h("finger%d-%d" % (f, k)) for k in (1, 2, 3)] + [arm.t("finger%d-3" % f)]
+        p, cum, angs = joints[0], 0.0, []
+        for k in range(3):
+            seg = joints[k + 1] - joints[k]
+            best, bd = 0.0, 1e9
+            for add in np.arange(0.0, 130.0, 0.5):
+                e = p + axis_angle(axis, math.radians(cum + add)) @ seg
+                d = e - c; dd = np.linalg.norm(d - (d @ k0) * k0)
+                if abs(dd - Rw) < bd: best, bd = add, abs(dd - Rw)
+                if dd <= Rw: best = add; break
+            cum += best
+            angs.append(cum)
+            p = p + axis_angle(axis, math.radians(cum)) @ seg
+        flex[f] = tuple(angs)
+    R, P = hand_rest(arm, flex)
+    return R, P, c, R_bar, flex
+
+
+def pose(arm, wheel_angle):
+    s = arm.side
+    if not hasattr(arm, "fist"):
+        arm.fist = fist(arm)
+    Rf, Pf, c0, r0, _ = arm.fist
+    m0, k0, n0 = arm.palm_side()
+    S0, E0, W0 = arm.h("upperarm01"), arm.h("lowerarm01"), arm.h("wrist")
+    # the rim at the grip: X radial out, Y along the rim (anticlockwise), Z towards the driver
+    Wf = rot_x(-(90 - WHEEL_TILT))
+    Hf = Wf @ rot_z(wheel_angle + HAND_ANGLE[s])
+    X, Y, Z = Hf[:, 0], Hf[:, 1], Hf[:, 2]
+    grip = WHEEL + Hf @ np.array([WHEEL_R, 0, 0])
+    up_t = Y if s > 0 else -Y                    # along the rim towards twelve o'clock
+    k_t = -up_t                                  # index finger on top, little finger below
+    # turn the fist round the rim so the wrist points back along the forearm towards the
+    # shoulder (a straight wrist), then let it roll a little outwards
+    Sh = SHOULDER[s]
+    to_sh = Sh - grip; to_sh -= np.dot(to_sh, Y) * Y
+    w_dir = to_sh / np.linalg.norm(to_sh)
+    w_dir = math.cos(math.radians(ROLL)) * w_dir + math.sin(math.radians(ROLL)) * np.cross(Y, w_dir)
+    w0 = W0 - c0
+    Rh = align(k0, w0, k_t, w_dir)
+    W = grip + Rh @ (W0 - c0)                   # the hollow of the fist sits on the rim
+    m_t, n_t = Rh @ m0, Rh @ n0
+    # arm: shoulder -> elbow -> wrist, the shoulder leaning in when the wrist is out of reach
+    la, lb = np.linalg.norm(E0 - S0) * STRETCH, np.linalg.norm(W0 - E0) * STRETCH
+    S = SHOULDER[s]
+    d = W - S; dl = np.linalg.norm(d); u = d / dl
+    if dl > (la + lb) * 0.96:
+        S = S + u * (dl - (la + lb) * 0.96)
+        d = W - S; dl = np.linalg.norm(d)
+    dc = min(max(dl, 0.05), la + lb - 1e-4)
+    along = (la * la - lb * lb + dc * dc) / (2 * dc)
+    hgt = math.sqrt(max(0.0, la * la - along * along))
+    pole = np.array([0.8 * s, -1.0, 0.25]); pole -= np.dot(pole, u) * u; pole /= np.linalg.norm(pole)
+    E = S + u * along + pole * hgt
+    arm.reach = dl / (la + lb)
+    up0, fo0 = E0 - S0, W0 - E0
+    up1, fo1 = E - S, W - E
+    bend0, bend1 = np.cross(up0, fo0), np.cross(up1, fo1)
+    Ru = align(up0, bend0, up1, bend1)
+    Rl_bend = align(fo0, bend0, fo1, bend1)
+    Rl_twist = align(fo0, n0, fo1, n_t)          # the forearm turns with the back of the hand
+    Rl1 = slerp(Rl_bend, Rl_twist, 0.45)
+    Rl2 = Rl_twist
+
+    def stretch(v):
+        v = v / np.linalg.norm(v)
+        return np.eye(3) + (STRETCH - 1) * np.outer(v, v)
+    Su, Sl = stretch(up0), stretch(fo0)
+    Ru_s, Rl1_s, Rl2_s = Ru @ Su, Rl1 @ Sl, Rl2 @ Sl
+    R = {"shoulder01": Ru, "upperarm01": Ru_s, "upperarm02": Ru_s, "lowerarm01": Rl1_s, "lowerarm02": Rl2_s}
+    P = {"shoulder01": S + Ru @ (arm.h("shoulder01") - S0), "upperarm01": S,
+         "upperarm02": S + Ru_s @ (arm.h("upperarm02") - S0), "lowerarm01": E,
+         "lowerarm02": E + Rl1_s @ (arm.h("lowerarm02") - E0)}
+    for b in Rf:                                 # the fist, carried by the hand
+        R[b] = Rh @ Rf[b]
+        P[b] = W + Rh @ (Pf[b] - W0)
+    # thumb: wraps over the rim from the driver's side, lying along it towards the index finger
+    t_base = W + Rh @ (arm.h("finger1-1") - W0)
+    side = t_base - grip; side -= np.dot(side, Y) * Y; side /= np.linalg.norm(side)
+    target = grip + up_t * THUMB_ALONG + side * (GRIP_T + 0.011)
+    th0 = arm.t("finger1-1") - arm.h("finger1-1")
+    t_dir = target - t_base; t_dir /= np.linalg.norm(t_dir)
+    Rt1 = align(Rh @ th0, Rh @ n0, t_dir, side) @ Rh
+    R["finger1-1"], P["finger1-1"] = Rt1, t_base
+    Rp, Pp, Hp = Rt1, t_base, arm.h("finger1-1")
+    taxis = np.cross(t_dir, side)               # curls the tip towards the rim
+    for k, ang in ((2, 15), (3, 25)):
+        b = "finger1-%d" % k
+        hp = Pp + Rp @ (arm.h(b) - Hp)
+        Rb = axis_angle(taxis, math.radians(ang)) @ Rt1
+        if np.dot(Rb @ (arm.t(b) - arm.h(b)), side) > np.dot(Rt1 @ (arm.t(b) - arm.h(b)), side):
+            Rb = axis_angle(taxis, -math.radians(ang)) @ Rt1
+        R[b], P[b] = Rb, hp
+        Rp, Pp, Hp = Rb, hp, arm.h(b)
+    return skin(arm, R, P)
 
 
 def normals(P, faces):

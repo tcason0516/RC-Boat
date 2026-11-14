@@ -13,7 +13,8 @@ glove with a darker palm (material ids, coloured by the game).
 
 The grip: the fist is closed round a bar the size of the gloved rim (each finger bone turned
 until it lands on the bar), the rim is put through the fist's hollow, and the fist is rolled
-round the rim so the back of the hand faces the driver.
+round the rim so the palms face in, the knuckles point forward and the fingers wrap the far
+side of the rim, with the thumb along its near face.
 
 Usage: python3 build_arms.py MH_DIR OUT_FILE [DEBUG_DIR]
 """
@@ -30,7 +31,7 @@ HAND_ANGLE = {+1: 20.0, -1: 160.0}
 ANGLES = list(range(-60, 61, 10))
 SCALE = 0.1 * 1.1 
 STRETCH = 1.2          # the base mesh has short arms; lengthen upper arm and forearm only
-ROLL = -40.0           # roll of the fist round the rim (degrees): the back of the hand turns to face the driver
+ROLL = 40.0            # roll of the fist round the rim (degrees): palms face in, knuckles forward
 THUMB_ALONG = 0.035    # how far along the rim (towards twelve) the thumb tip reaches
 FINGER_HALF = 0.0085   # half a finger's thickness (centre line to skin)
 BAR_BACK = 0.015       # where the rim crosses the palm: this far behind the knuckles
@@ -365,10 +366,10 @@ def pose(arm, wheel_angle):
     for b in Rf:                                 # the fist, carried by the hand
         R[b] = Rh @ Rf[b]
         P[b] = W + Rh @ (Pf[b] - W0)
-    # thumb: wraps over the rim from the driver's side, lying along it towards the index finger
+    # thumb: across the driver's face of the rim, lying along it towards twelve o'clock
     t_base = W + Rh @ (arm.h("finger1-1") - W0)
-    side = t_base - grip; side -= np.dot(side, Y) * Y; side /= np.linalg.norm(side)
-    target = grip + up_t * THUMB_ALONG + side * (GRIP_T + 0.011)
+    side = Z * 0.9 - X * 0.45; side /= np.linalg.norm(side)   # the rim's face towards the driver
+    target = grip + up_t * THUMB_ALONG + side * (GRIP_T + 0.010)
     th0 = arm.t("finger1-1") - arm.h("finger1-1")
     t_dir = target - t_base; t_dir /= np.linalg.norm(t_dir)
     Rt1 = align(Rh @ th0, Rh @ n0, t_dir, side) @ Rh

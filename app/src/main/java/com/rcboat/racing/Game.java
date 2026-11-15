@@ -86,7 +86,24 @@ final class Game {
     int view = VIEW_SHORE;
     int trackId = 0;
     int hull = Boat.V_HULL;
-    boolean dualStick = true;
+    /** Controls: two sticks (throttle left, steering right), one stick for both, or a
+     *  throttle stick with steering by tilting the phone like a steering wheel. */
+    static final int CTRL_TWO = 0, CTRL_ONE = 1, CTRL_TILT = 2;
+    static final String[] CONTROL_NAMES = {"Two sticks", "One stick", "Tilt to steer"};
+    int controls = CTRL_TWO;
+    /** Steering from tilting the phone, -1..1 (written by the activity); and whether it has the sensor. */
+    volatile float tiltSteer;
+    volatile boolean tiltAvailable = true;
+
+    /** The next control scheme (skipping tilt on phones without the sensor). */
+    int nextControls(int dir) {
+        int c = controls;
+        for (int i = 0; i < 3; i++) {
+            c = (c + dir + 3) % 3;
+            if (c != CTRL_TILT || tiltAvailable) return c;
+        }
+        return CTRL_TWO;
+    }
     boolean soundOn = true;
     boolean announcerOn = true;
     int power = ELECTRIC;

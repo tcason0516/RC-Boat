@@ -182,8 +182,8 @@ final class HudView extends View {
                 () -> { g.power = RaceClass.step(g.power, 1, nP, q -> RaceClass.powerOk(g.raceClass, q)); g.enforceRules(); });
         row(c, x1, y0 + 3 * rowH, colW, rowH, "Camera", Game.VIEW_NAMES[g.view],
                 () -> g.view = (g.view + 2) % 3, () -> g.view = (g.view + 1) % 3);
-        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
-                () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", Game.CONTROL_NAMES[g.controls],
+                () -> g.controls = g.nextControls(-1), () -> g.controls = g.nextControls(1));
         String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
         row(c, x1, y0 + 5 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
         row(c, x1, y0 + 6 * rowH, colW, rowH, "Radius buoys", g.radiusBuoys ? "On" : "Off",
@@ -266,8 +266,8 @@ final class HudView extends View {
         row(c, x1, y0, colW, rowH, "Camera", g.view == Game.VIEW_FPV ? "Cockpit" : "Chase",
                 () -> g.view = g.view == Game.VIEW_FPV ? Game.VIEW_CHASE : Game.VIEW_FPV,
                 () -> g.view = g.view == Game.VIEW_FPV ? Game.VIEW_CHASE : Game.VIEW_FPV);
-        row(c, x1, y0 + rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
-                () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
+        row(c, x1, y0 + rowH, colW, rowH, "Controls", Game.CONTROL_NAMES[g.controls],
+                () -> g.controls = g.nextControls(-1), () -> g.controls = g.nextControls(1));
         String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
         row(c, x1, y0 + 2 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
 
@@ -494,21 +494,46 @@ final class HudView extends View {
         left.cy = h - r - 9 * u;
         right.cx = w - inset;
         right.cy = h - r - 9 * u;
-        if (game.dualStick) {
+        if (game.controls == Game.CTRL_TWO) {
             left.useX = false; left.useY = true;     // throttle
             right.useX = true; right.useY = false;   // steering
+        } else if (game.controls == Game.CTRL_TILT) {
+            left.useX = false; left.useY = true;     // throttle; steering by tilting the phone
         } else {
             left.useX = true; left.useY = true;
         }
     }
 
     private void drawSticks(Canvas c) {
-        if (game.dualStick) {
+        if (game.controls == Game.CTRL_TWO) {
             drawStick(c, left, "THROTTLE");
             drawStick(c, right, "STEER");
+        } else if (game.controls == Game.CTRL_TILT) {
+            drawStick(c, left, "THROTTLE");
+            // steering comes from the phone's tilt every frame
+            game.inSteer = shape(game.tiltSteer);
+            drawTilt(c);
         } else {
             drawStick(c, left, "DRIVE");
         }
+    }
+
+    /** Tilt steering: a small steering wheel that turns with the phone. */
+    private void drawTilt(Canvas c) {
+        float cx = right.cx, cy = right.cy + 2 * u, r = 9 * u;
+        float a = game.inSteer * 90f;
+        stroke.setColor(0xAAFFFFFF);
+        stroke.setStrokeWidth(1.4f * u);
+        c.drawCircle(cx, cy, r, stroke);
+        c.save();
+        c.rotate(a, cx, cy);
+        stroke.setStrokeWidth(1.1f * u);
+        c.drawLine(cx - r, cy, cx + r, cy, stroke);
+        c.drawLine(cx, cy, cx, cy + r, stroke);
+        fill.setColor(0xFFFF7043);
+        c.drawCircle(cx, cy - r, 1.4f * u, fill);
+        c.restore();
+        textC(c, "TILT TO STEER", cx, cy - r - 4 * u, 3.2f * u, 0xCCFFFFFF);
     }
 
     private void drawStick(Canvas c, Stick s, String label) {
@@ -841,8 +866,8 @@ final class HudView extends View {
                 : g.view == Game.VIEW_CHASE ? "Chase" : "Shore";
         row(c, x1, y0 + 3 * rowH, colW, rowH, "Camera", camName,
                 () -> g.view = cycleView(g, -1), () -> g.view = cycleView(g, 1));
-        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
-                () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", Game.CONTROL_NAMES[g.controls],
+                () -> g.controls = g.nextControls(-1), () -> g.controls = g.nextControls(1));
         String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
         row(c, x1, y0 + 5 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
 
@@ -1099,7 +1124,7 @@ final class HudView extends View {
     private void layoutCombatButtons(int w, int h) {
         fireR = 9.5f * u;
         specR = 7f * u;
-        if (game.dualStick) {
+        if (game.controls != Game.CTRL_ONE) {
             fireX = w - 13 * u;
             fireY = right.cy - right.radius - 17 * u;
         } else {
@@ -1111,7 +1136,7 @@ final class HudView extends View {
         weapR = 7f * u;
         weapX = fireX;
         weapY = fireY + fireR + weapR + 3 * u;
-        if (game.dualStick || weapY + weapR > getHeight() - u) {
+        if (game.controls != Game.CTRL_ONE || weapY + weapR > getHeight() - u) {
             // beside the SPECIAL button when there's no room underneath
             weapX = specX - specR - weapR - 3 * u;
             weapY = specY;
@@ -1267,7 +1292,9 @@ final class HudView extends View {
                 }
                 if (pressButton(x, y)) break;
                 if (!sticksActive()) break;
-                if (game.dualStick) {
+                if (game.controls == Game.CTRL_TILT) {
+                    if (x < getWidth() / 2f && left.pointer < 0) { left.pointer = id; left.move(x, y); }
+                } else if (game.controls == Game.CTRL_TWO) {
                     if (x < getWidth() / 2f) {
                         if (left.pointer < 0) { left.pointer = id; left.move(x, y); }
                     } else if (right.pointer < 0) {
@@ -1343,9 +1370,12 @@ final class HudView extends View {
     }
 
     private void pushInput() {
-        if (game.dualStick) {
+        if (game.controls == Game.CTRL_TWO) {
             game.inThrottle = shape(-left.ky);
             game.inSteer = shape(right.kx);
+        } else if (game.controls == Game.CTRL_TILT) {
+            game.inThrottle = shape(-left.ky);
+            game.inSteer = shape(game.tiltSteer);
         } else {
             game.inThrottle = shape(-left.ky);
             game.inSteer = shape(left.kx);

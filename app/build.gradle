@@ -34,6 +34,28 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Two apps from one code base: the racing game, and the combat version (weapons, last
+    // boat standing). They install side by side.
+    flavorDimensions 'game'
+    productFlavors {
+        racing {
+            dimension 'game'
+            applicationId 'com.rcboat.racing'
+            buildConfigField 'boolean', 'COMBAT', 'false'
+            resValue 'string', 'app_name', 'RC Boat Racing'
+        }
+        combat {
+            dimension 'game'
+            applicationId 'com.rcboat.combat'
+            buildConfigField 'boolean', 'COMBAT', 'true'
+            resValue 'string', 'app_name', 'RC Boat Combat'
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

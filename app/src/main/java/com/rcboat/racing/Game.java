@@ -39,7 +39,7 @@ final class Game {
             "Gas LSG36: up to 36 cc",
             "Gas TLSG64: twin cylinders, up to 64 cc"};
     /** Top speed and acceleration multipliers, throttle response time (s). */
-    private static final float[][] POWER_STATS = {
+    static final float[][] POWER_STATS = {
             {1.08f, 1.30f, 0.05f},
             {1.00f, 0.92f, 0.24f},
             {1.05f, 0.97f, 0.24f},
@@ -144,6 +144,15 @@ final class Game {
 
     // ---- input (written by the UI thread) ----
     volatile float inThrottle, inSteer;
+    /** Combat: the FIRE button is held / SPECIAL was tapped. */
+    volatile boolean inFire, inSpecial;
+    /** Combat: where each boat is on screen (x, y as 0..1, and depth; -1 off screen), from the renderer. */
+    float[] screenXY = new float[COLORS.length * 3];
+
+    // ---- RC Boat Combat (the second app): weapons, last boat standing ----
+    /** Set by the app before the game is made: this is the combat version. */
+    static boolean combatBuild;
+    final Combat combat = new Combat(this);
 
     // ---- sound (read by the audio thread) ----
     volatile float engineLevel;     // 0..1 speed
@@ -184,11 +193,13 @@ final class Game {
         deckY = groundY + PLATFORM_HEIGHT;
         driverZ = platformZ - 0.9f;
         buoyWobble = new float[track.buoys.size()];
+        if (combatBuild) view = VIEW_CHASE;   // battles roam the whole lake
         startDemo();
     }
 
     /** Whether the island is shown / solid right now. */
     boolean islandVisible() {
+        if (combatBuild) return combat.islandOn();
         return track.hasIsland && !(state != State.MENU && view == VIEW_SHORE);
     }
 
@@ -302,7 +313,10 @@ final class Game {
         for (int i = 0; i < noiseTune.length; i++)
             noiseTune[i] = i == 0 ? -2.5f : rnd.nextFloat() < 0.25f ? 2.5f + rnd.nextFloat() * 2f : -3f + rnd.nextFloat() * 2f;
         paused = false;
-        createBoats(6, false);
+        if (combatBuild) {
+            combat.startDemo();
+            state = State.MENU;
+        } else createBoats(6, false);
         raceTime = 0;
         camInit = false;
         message = "";
@@ -374,6 +388,10 @@ final class Game {
     }
 
     synchronized void startRace() {
+        if (combatBuild) {
+            startBattle();
+            return;
+        }
         enforceRules();
         heat++;
         resultNote = "";
@@ -515,6 +533,7 @@ final class Game {
             return true;
         }
         if (state == State.FINISHED && finishedFor > 2f) { startDemo(); return true; }
+        if (combatBuild && combat.roundOver && combat.matchOver) { startDemo(); return true; }
         paused = !paused;
         return true;
     }
@@ -522,6 +541,84 @@ final class Game {
     void setMessage(String m, float seconds) {
         message = m;
         messageTime = seconds;
+    }
+
+    /** Buoys on the water: the course's, or the combat arena's obstacles. */
+    java.util.ArrayList<float[]> buoyList() {
+        return combatBuild ? combat.obstacles : track.buoys;
+    }
+
+    /** The boat the camera follows: the player, or (combat) who the player is watching. */
+    Boat viewBoat() {
+        if (combatBuild && player != null && player.out && combat.spectate != null) return combat.spectate;
+        return player;
+    }
+
+    // ------------------------------------------------------------------ combat
+
+    private synchronized void startBattle() {
+        combat.weapon = Math.max(0, Math.min(Weapons.COUNT - 1, combat.weapon));
+        if (lifeSize && view == VIEW_SHORE) view = VIEW_CHASE;
+        combat.startMatch();
+        announcer.reset();
+        announcer.banned.clear();
+        for (String s : ELECTRIC_ONLY) announcer.banned.add(s);
+        announcer.banned.add("winme_0");
+        announcer.enabled = announcerOn && soundOn;
+        if (announcer.say("cstart", 5, "start", 0f, Announcer.IMPORTANT))
+            countdown = Math.max(countdown, 3f + announcer.remaining() + 0.3f);
+        paused = false;
+        message = "";
+        camInit = false;
+        raceTime = 0;
+        finishedFor = 0;
+        inFire = false;
+        inSpecial = false;
+        beepRequest = 520;
+    }
+
+    /** Next round of a match (from the results screen). */
+    synchronized void nextRound() {
+        combat.nextRound();
+        camInit = false;
+        beepRequest = 520;
+    }
+
+    private void combatCountdown(float dt) {
+        int before = (int) Math.ceil(countdown);
+        countdown -= dt;
+        int after = (int) Math.ceil(countdown);
+        boolean voice = announcerOn && soundOn;
+        for (Boat b : boats) { b.throttle = 0; b.steer = 0; }
+        // boats bob in place
+        for (Boat b : boats) { b.vx *= 0.9f; b.vz *= 0.9f; }
+        if (countdown <= 0) {
+            state = State.RACING;
+            if (!voice) beepRequest = 1040;
+            setMessage("FIGHT!", 1.0f);
+            announcer.enabled = announcerOn;
+            if (!announcer.say("cgo", 3, "count", 0f, Announcer.CUT))
+                announcer.say("go", 2, "count", 0f, Announcer.CUT);
+        } else if (after != before && after <= 3) {
+            if (!voice) beepRequest = 520;
+            announcer.enabled = announcerOn;
+            announcer.say("count_" + after, 0, "count", 0f, Announcer.CUT);
+        }
+    }
+
+    /** One step of a battle (or of the menu's demo battle). */
+    void combatStep(float dt) {
+        combat.control(dt);
+        int sub = 2;
+        float h = dt / sub;
+        for (int s = 0; s < sub; s++) {
+            for (Boat b : boats) b.step(h);
+            collide();
+        }
+        combat.update(dt);
+        for (Boat b : boats) if (!b.out) emitWake(b, dt);
+        particles.update(dt);
+        spray.update(dt);
     }
 
     // ------------------------------------------------------------------ update
@@ -538,9 +635,15 @@ final class Game {
 
         switch (state) {
             case MENU:
-                simulate(dt, true);
+                if (combatBuild) combatStep(dt);
+                else simulate(dt, true);
                 break;
-            case COUNTDOWN: {
+            case COUNTDOWN:
+                if (combatBuild) {
+                    combatCountdown(dt);
+                    break;
+                }
+            {
                 int before = (int) Math.ceil(countdown);
                 countdown -= dt;
                 int after = (int) Math.ceil(countdown);
@@ -574,14 +677,18 @@ final class Game {
             case FINISHED:
                 raceTime += dt;
                 if (state == State.FINISHED) finishedFor += dt;
-                simulate(dt, false);
+                if (combatBuild) combatStep(dt);
+                else simulate(dt, false);
                 break;
         }
 
         if (lifeSize) for (Boat b : boats) b.smoothAttitude(time, dt);
-        if (player != null && state != State.MENU) announce(dt);
-
         if (player != null && state != State.MENU) {
+            if (combatBuild) announcer.tick(dt);
+            else announce(dt);
+        }
+
+        if (player != null && state != State.MENU && !(combatBuild && player.out)) {
             engineOn = true;
             engineLevel = Boat.clamp(player.speed() / (lifeSize ? 75f : Boat.BASE_MAX_SPEED), 0f, 1.2f);
             engineThrottle = Math.abs(player.throttle);
@@ -633,8 +740,10 @@ final class Game {
         // boat vs boat
         for (int i = 0; i < boats.length; i++) {
             Boat a = boats[i];
+            if (a.out) continue;
             for (int j = i + 1; j < boats.length; j++) {
                 Boat c = boats[j];
+                if (c.out) continue;
                 // the deepest overlap between the two hulls' collision circles
                 float best = 0f, nx = 0f, nz = 0f;
                 float min = a.circleR() + c.circleR();
@@ -662,10 +771,12 @@ final class Game {
             }
         }
         // boat vs buoys
+        java.util.ArrayList<float[]> buoys = buoyList();
         for (Boat b : boats) {
+            if (b.out) continue;
             float min = b.circleR() + track.buoyRadius;
-            for (int k = 0; k < track.buoys.size(); k++) {
-                float[] bu = track.buoys.get(k);
+            for (int k = 0; k < buoys.size(); k++) {
+                float[] bu = buoys.get(k);
                 for (int kb = 0; kb < b.circles(); kb++) {
                     float cx = b.circleX(kb), cz = b.circleZ(kb);
                     float dx = cx - bu[0], dz = cz - bu[1];
@@ -683,7 +794,7 @@ final class Game {
                         b.vz *= 0.8f;
                         buoyWobble[k] = Math.min(1f, buoyWobble[k] + Math.abs(vn) * 0.12f);
                         if (b.isPlayer && vn < -1.5f) evBuoy = true;
-                        if (state == State.RACING && rules != RULES_FUN && !b.finished && vn < -0.4f) {
+                        if (state == State.RACING && rules != RULES_FUN && !b.finished && vn < -0.4f && !combatBuild) {
                             int num = (int) bu[3];
                             infraction(b, num > 0 ? "HIT BUOY " + num : "HIT BUOY", null);
                         }
@@ -691,7 +802,7 @@ final class Game {
                 }
             }
             // the start clock floats in the infield of the IMPBA ovals
-            if (track.impba && !track.life) {
+            if (track.impba && !track.life && !combatBuild) {
                 float cmin = b.radius + 1.1f;
                 float dx = b.x - track.clockX, dz = b.z - track.clockZ;
                 float d2 = dx * dx + dz * dz;
@@ -1221,8 +1332,9 @@ final class Game {
             out[10] = 0.5f;
             return;
         }
-        Boat b = player;
-        if (view == VIEW_FPV) {
+        Boat b = viewBoat();
+        if (b == null) b = player;
+        if (view == VIEW_FPV && b == player && !b.out) {
             // Stabilised: only a fraction of the boat's pitch/roll reaches the camera,
             // and it is low-pass filtered so wave chop gives a gentle sway, not a shake.
             b.waveAttitude(time, att);
@@ -1258,7 +1370,7 @@ final class Game {
             out[10] = 0.05f;
             return;
         }
-        if (view == VIEW_CHASE) {
+        if (view == VIEW_CHASE || (combatBuild && view != VIEW_SHORE)) {
             if (!camInit) {
                 chaseHeading = b.heading;
                 camInit = true;

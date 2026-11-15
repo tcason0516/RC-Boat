@@ -2,7 +2,6 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -24,16 +23,20 @@ jobs:
       - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk RCBoatRacing.apk
+          ./gradlew --no-daemon assembleRacingRelease assembleCombatRelease
+          cp app/build/outputs/apk/racing/release/app-racing-release.apk RCBoatRacing.apk
+          cp app/build/outputs/apk/combat/release/app-combat-release.apk RCBoatCombat.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RCBoatRacing-apk
-          path: RCBoatRacing.apk
+          name: RCBoat-apks
+          path: |
+            RCBoatRacing.apk
+            RCBoatCombat.apk
 
       - name: Publish "latest" release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -42,8 +45,8 @@ jobs:
           for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" -q '.[] | select(.draft) | .id'); do
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" || true
           done
-          gh release create latest RCBoatRacing.apk \
+          gh release create latest RCBoatRacing.apk RCBoatCombat.apk \
             --target "$GITHUB_SHA" \
-            --title "RC Boat Racing (latest build)" \
-            --notes "Built from ${GITHUB_SHA::7}. Open this page on your Android phone and tap RCBoatRacing.apk to download and install."
+            --title "RC Boat Racing and RC Boat Combat (latest builds)" \
+            --notes "Built from ${GITHUB_SHA::7}. Open this page on your Android phone and tap RCBoatRacing.apk (racing) or RCBoatCombat.apk (combat: weapons, last boat standing) to download and install. The two apps install side by side."
           gh release edit latest --draft=false --latest

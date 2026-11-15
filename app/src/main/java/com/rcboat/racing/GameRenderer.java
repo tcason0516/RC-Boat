@@ -365,10 +365,63 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             }
             """;
 
+    /** Combat effects: camera-facing soft discs and ribbons with their own colour. */
+    private static final String FX_VS = """
+            uniform mat4 uVP;
+            attribute vec3 aPos;
+            attribute vec4 aCol;
+            attribute vec2 aUV;
+            varying vec4 vCol;
+            varying vec2 vUV;
+            void main() {
+              vCol = aCol;
+              vUV = aUV;
+              gl_Position = uVP * vec4(aPos, 1.0);
+            }
+            """;
+
+    private static final String FX_FS = FS_HEADER + """
+            varying vec4 vCol;
+            varying vec2 vUV;
+            void main() {
+              float d = length(vUV);
+              float a = vCol.a * (1.0 - smoothstep(0.2, 1.0, d));
+              gl_FragColor = vec4(vCol.rgb, clamp(a, 0.0, 1.0));
+            }
+            """;
+
     // ------------------------------------------------------------------ state
 
     private final Game game;
     private final android.content.Context context;
+
+    // ---- RC Boat Combat: weapons, shots, crates and effects (copied each frame) ----
+    private CombatArt art;
+    private int fxProg, fPos, fCol, fUV, fVP;
+    private static final int FX_STRIDE = 9;   // x y z  r g b a  u v
+    private final FloatBuffer glowBuf, smokeBuf, oilBuf;
+    private int glowVerts, smokeVerts, oilVerts;
+    private static final int MAX_SHOTS = 400, MAX_MINES = 64, MAX_CRATES = 16, MAX_AREAS = 24;
+    private final float[] fxData;          // x y z size alpha r g b glow
+    private int fxCount;
+    private final boolean[] cbVisible = new boolean[Game.COLORS.length], cbOut = new boolean[Game.COLORS.length],
+            cbFire = new boolean[Game.COLORS.length];
+    private final int[] cbWeapon = new int[Game.COLORS.length], cbTether = new int[Game.COLORS.length];
+    private final float[] cbAim = new float[Game.COLORS.length], cbShield = new float[Game.COLORS.length],
+            cbEmp = new float[Game.COLORS.length], cbSpin = new float[Game.COLORS.length];
+    private final float[][] cbPos = new float[Game.COLORS.length][4];   // x, y, z, scale
+    private final float[] shotData = new float[MAX_SHOTS * 8];          // kind x y z heading vx vy vz
+    private int shotCount;
+    private final float[] mineData = new float[MAX_MINES * 3];          // x z armed
+    private int mineCount;
+    private final float[] crateData = new float[MAX_CRATES * 4];        // x z kind spin
+    private int crateCount;
+    private final float[] oilData = new float[MAX_AREAS * 4];           // x z r alpha
+    private int oilCount;
+    private boolean combatNow;
+    private float kNow = 1f;
+    private final float[] screenTmp = new float[Game.COLORS.length * 3];
+    private final float[] tmp4 = new float[4], tmp4b = new float[4];
     private Scenery scene, rcScene, lifeScene;
     private int texDepthLife;
     /** This frame: life-size world, and the player's cockpit view in it. */
@@ -420,6 +473,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private final boolean[] figureVisible = new boolean[Game.COLORS.length];
     private Track track;
     private boolean islandOn;
+    private java.util.ArrayList<float[]> buoyList = new java.util.ArrayList<>();
     private final Mesh[] gates = new Mesh[Track.COUNT];
     private final Mesh[] kits = new Mesh[Track.COUNT];
     private int boatCount;
@@ -445,6 +499,11 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         sprayBuf = ByteBuffer.allocateDirect(game.spray.max * 6 * 6 * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
         sprayData = new float[game.spray.max * 5];
+        int fxMax = game.combat.fx.max + MAX_SHOTS + 64;
+        glowBuf = ByteBuffer.allocateDirect(fxMax * 6 * FX_STRIDE * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        smokeBuf = ByteBuffer.allocateDirect(fxMax * 6 * FX_STRIDE * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        oilBuf = ByteBuffer.allocateDirect(MAX_AREAS * 6 * 6 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        fxData = new float[game.combat.fx.max * 9];
     }
 
     @Override
@@ -541,6 +600,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         pNoiseAmt = GLES20.glGetUniformLocation(partProg, "uNoiseAmt");
         pNoise = GLES20.glGetUniformLocation(partProg, "uNoise");
         pNoiseScale = GLES20.glGetUniformLocation(partProg, "uNoiseScale");
+
+        fxProg = program(FX_VS, FX_FS);
+        fPos = GLES20.glGetAttribLocation(fxProg, "aPos");
+        fCol = GLES20.glGetAttribLocation(fxProg, "aCol");
+        fUV = GLES20.glGetAttribLocation(fxProg, "aUV");
+        fVP = GLES20.glGetUniformLocation(fxProg, "uVP");
+        art = Game.combatBuild ? new CombatArt() : null;
 
         GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
         texNoise = texture(TextureGen.noise(), TextureGen.NOISE_N, GLES20.GL_LUMINANCE, true);
@@ -698,13 +764,15 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             lifeNow = game.lifeSize;
             playerIdx = -1;
             for (int i = 0; i < boatCount; i++) if (game.boats[i].isPlayer) playerIdx = i;
-            cockpitView = lifeNow && game.state != Game.State.MENU && game.view == Game.VIEW_FPV && playerIdx >= 0;
+            cockpitView = lifeNow && game.state != Game.State.MENU && game.view == Game.VIEW_FPV && playerIdx >= 0
+                    && !(Game.combatBuild && game.boats[playerIdx].out);
             if (playerIdx >= 0) {
                 // the wheel follows the player's steering, smoothed like real hands
                 float target = -game.boats[playerIdx].steer * 60f;   // +-60 degrees of lock
                 wheelAngle += (target - wheelAngle) * Math.min(1f, dt * 8f);
             }
             islandOn = game.islandVisible();
+            buoyList = game.buoyList();
             boolean shore = game.state != Game.State.MENU && game.view == Game.VIEW_SHORE;
             for (int i = 0; i < boatCount; i++) {
                 Boat b = game.boats[i];
@@ -733,6 +801,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             clockColon = clockText.length() == 3 && clockText.charAt(0) != ' ';
             if (wobble.length != game.buoyWobble.length) wobble = new float[game.buoyWobble.length];
             System.arraycopy(game.buoyWobble, 0, wobble, 0, wobble.length);
+            combatNow = Game.combatBuild;
+            kNow = game.lifeSize ? 7.5f : 1f;
+            if (combatNow) copyCombat();
             fillParticles(game.particles);
             Spray sp = game.spray;
             int n = 0;
@@ -794,7 +865,18 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         drawFlat(shadowBuf, shadowVerts, 0.0f, 0.03f, 0.05f, 0f);
         drawFlat(partBuf, partVerts, 0.94f, 0.97f, 1.0f, 1f);
         fillSpray();
+        if (combatNow) {
+            fillOil();
+            drawFlat(oilBuf, oilVerts, 0.02f, 0.02f, 0.03f, 0.35f);
+        }
         drawFlat(sprayBuf, sprayVerts, 0.93f, 0.96f, 1.0f, 0.55f);
+        if (combatNow) {
+            fillFx();
+            drawFx(smokeBuf, smokeVerts, false);
+            drawFx(glowBuf, glowVerts, true);
+            drawShields();
+            projectBoats();
+        }
         drawCanopyGlass();
         GLES20.glDepthMask(true);
         GLES20.glDisable(GLES20.GL_BLEND);
@@ -867,7 +949,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             GLES20.glUniform1f(uSway, 0f);
         }
         material(0.35f, 40f, false);
-        if (!track.impba) drawLit(gates[track.id]);
+        if (combatNow) { /* arena: no start gate or course kit */ }
+        else if (!track.impba) drawLit(gates[track.id]);
         else if (!track.life) {
             if (kits[track.id] != null) drawLit(kits[track.id]);
             drawClock();
@@ -885,7 +968,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
         // buoys
         material(0.7f, 60f, false);
-        java.util.ArrayList<float[]> buoys = track.buoys;
+        java.util.ArrayList<float[]> buoys = buoyList;
         for (int i = 0; i < buoys.size(); i++) {
             float[] bu = buoys.get(i);
             float wy = World.wave(bu[0], bu[1], time);
@@ -903,6 +986,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         // boats: glossy gelcoat
         material(0.9f, 90f, false);
         for (int i = 0; i < boatCount; i++) {
+            if (combatNow && !cbVisible[i]) continue;
             System.arraycopy(boatM[i], 0, model, 0, 16);
             Mesh m = scene.boats[boatHull[i]][boatColor[i]];
             if (m != null) drawLit(m);
@@ -918,6 +1002,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 }
             }
         }
+
+        if (combatNow && art != null) drawCombatSolids(reflection);
 
         // "this is you" marker above the player's boat (shore view only)
         if (showMarker && !reflection) {
@@ -1163,6 +1249,306 @@ final class GameRenderer implements GLSurfaceView.Renderer {
      * The canopy seen from inside: faintly tinted glass with the sun's glints, drawn over
      * everything else so the water outside shows through it too.
      */
+    // ------------------------------------------------------------------ combat drawing
+
+    /** Copies what the combat scene needs while the game is locked. */
+    private void copyCombat() {
+        Combat c = game.combat;
+        for (int i = 0; i < boatCount; i++) {
+            Boat b = game.boats[i];
+            cbVisible[i] = Combat.visible(b);
+            cbOut[i] = b.out;
+            cbWeapon[i] = b.weapon;
+            cbAim[i] = b.aimYaw;
+            cbFire[i] = b.fire;
+            cbShield[i] = b.shield;
+            cbEmp[i] = b.emp;
+            if (b.weapon == Weapons.DRILL && b.fire && !b.out) cbSpin[i] += 900f * 0.016f;
+            cbPos[i][0] = b.x; cbPos[i][1] = b.y; cbPos[i][2] = b.z; cbPos[i][3] = b.fx;
+            cbTether[i] = -1;
+            if (b.tether != null)
+                for (int j = 0; j < boatCount; j++) if (game.boats[j] == b.tether) cbTether[i] = j;
+        }
+        shotCount = 0;
+        for (Combat.Shot sh : c.shots) {
+            if (shotCount >= MAX_SHOTS) break;
+            int o = shotCount * 8;
+            shotData[o] = sh.kind; shotData[o + 1] = sh.x; shotData[o + 2] = sh.y; shotData[o + 3] = sh.z;
+            shotData[o + 4] = sh.kind == Combat.SHOT_BULLET || sh.kind == Combat.SHOT_HARPOON
+                    ? Combat.bearing(sh.vx, sh.vz) : sh.heading;
+            shotData[o + 5] = sh.vx; shotData[o + 6] = sh.vy; shotData[o + 7] = sh.vz;
+            shotCount++;
+        }
+        mineCount = 0;
+        for (Combat.Mine m : c.mines) {
+            if (mineCount >= MAX_MINES) break;
+            mineData[mineCount * 3] = m.x; mineData[mineCount * 3 + 1] = m.z;
+            mineData[mineCount * 3 + 2] = m.arm <= 0 ? 1f : 0f;
+            mineCount++;
+        }
+        crateCount = 0;
+        for (Combat.Crate cr : c.crates) {
+            if (crateCount >= MAX_CRATES) break;
+            int o = crateCount * 4;
+            crateData[o] = cr.x; crateData[o + 1] = cr.z; crateData[o + 2] = cr.kind; crateData[o + 3] = cr.spin;
+            crateCount++;
+        }
+        oilCount = 0;
+        for (Combat.Area a : c.slicks) {
+            if (oilCount >= MAX_AREAS) break;
+            int o = oilCount * 4;
+            oilData[o] = a.x; oilData[o + 1] = a.z; oilData[o + 2] = a.r;
+            oilData[o + 3] = Math.min(1f, a.life / 2f) * (a.burn > 0 ? 0.5f : 0.85f);
+            oilCount++;
+        }
+        Fx f = c.fx;
+        float[] col = tmp4;
+        fxCount = 0;
+        for (int i = 0; i < f.count; i++) {
+            float a = f.alphaOf(i);
+            if (a < 0.01f) continue;
+            f.colorOf(i, col);
+            int o = fxCount * 9;
+            fxData[o] = f.x[i]; fxData[o + 1] = f.y[i]; fxData[o + 2] = f.z[i];
+            fxData[o + 3] = f.sizeOf(i); fxData[o + 4] = a;
+            fxData[o + 5] = col[0]; fxData[o + 6] = col[1]; fxData[o + 7] = col[2];
+            fxData[o + 8] = f.glow[i] ? 1f : 0f;
+            fxCount++;
+        }
+    }
+
+    /** Weapons on the boats, torpedoes, rockets, harpoons, mines, crates and tow lines. */
+    private void drawCombatSolids(boolean reflection) {
+        material(0.5f, 40f, false);
+        for (int i = 0; i < boatCount; i++) {
+            if (!cbVisible[i] || cbOut[i]) continue;
+            int w = cbWeapon[i];
+            float[] mt = CombatArt.mount(boatHull[i], w);
+            if (art.base[w] != null) {
+                System.arraycopy(boatM[i], 0, model, 0, 16);
+                Matrix.translateM(model, 0, mt[0], mt[1], mt[2]);
+                Matrix.scaleM(model, 0, mt[3], mt[3], mt[3]);
+                drawLit(art.base[w]);
+            }
+            if (art.turret[w] != null) {
+                System.arraycopy(boatM[i], 0, model, 0, 16);
+                Matrix.translateM(model, 0, mt[0], mt[1], mt[2]);
+                Matrix.scaleM(model, 0, mt[3], mt[3], mt[3]);
+                if (w == Weapons.DRILL) Matrix.rotateM(model, 0, cbSpin[i], 0, 0, 1);
+                else Matrix.rotateM(model, 0, (float) Math.toDegrees(cbAim[i]), 0, 1, 0);
+                drawLit(art.turret[w]);
+            }
+            // a harpooned boat on the end of the line
+            int t = cbTether[i];
+            if (t >= 0 && !reflection) {
+                float ax = cbPos[i][0] + (float) -Math.sin(boatPose[i][2]) * 0.3f * kNow, az = cbPos[i][2]
+                        + (float) -Math.cos(boatPose[i][2]) * 0.3f * kNow;
+                float ay = cbPos[i][1] + 0.3f * kNow;
+                float bx = cbPos[t][0], by = cbPos[t][1] + 0.2f * kNow, bz = cbPos[t][2];
+                cable(ax, ay, az, bx, by, bz);
+            }
+        }
+        for (int s = 0; s < shotCount; s++) {
+            int o = s * 8;
+            int kind = (int) shotData[o];
+            if (kind == Combat.SHOT_BULLET) continue;   // tracers are drawn as glowing streaks
+            Matrix.setIdentityM(model, 0);
+            float y = kind == Combat.SHOT_TORPEDO ? -0.012f * kNow : shotData[o + 2];
+            Matrix.translateM(model, 0, shotData[o + 1], y, shotData[o + 3]);
+            Matrix.rotateM(model, 0, (float) Math.toDegrees(shotData[o + 4]), 0, 1, 0);
+            if (kind != Combat.SHOT_TORPEDO) {
+                float vy = shotData[o + 6], vh = (float) Math.hypot(shotData[o + 5], shotData[o + 7]);
+                Matrix.rotateM(model, 0, (float) Math.toDegrees(Math.atan2(vy, vh)), 1, 0, 0);
+            }
+            Matrix.scaleM(model, 0, kNow, kNow, kNow);
+            drawLit(kind == Combat.SHOT_TORPEDO ? art.torpedo : kind == Combat.SHOT_ROCKET ? art.rocket : art.harpoon);
+        }
+        for (int m = 0; m < mineCount; m++) {
+            float x = mineData[m * 3], z = mineData[m * 3 + 1];
+            Matrix.setIdentityM(model, 0);
+            Matrix.translateM(model, 0, x, World.wave(x, z, time) - 0.05f * kNow, z);
+            Matrix.rotateM(model, 0, (float) Math.sin(time * 1.7f + m) * 8f, 1, 0, 0.3f);
+            Matrix.scaleM(model, 0, kNow, kNow, kNow);
+            drawLit(art.mine);
+        }
+        for (int c = 0; c < crateCount; c++) {
+            int o = c * 4;
+            float x = crateData[o], z = crateData[o + 1];
+            Matrix.setIdentityM(model, 0);
+            Matrix.translateM(model, 0, x, World.wave(x, z, time) - 0.05f * kNow
+                    + 0.02f * kNow * (float) Math.sin(time * 2.3f + c), z);
+            Matrix.rotateM(model, 0, crateData[o + 3] * 25f, 0, 1, 0);
+            Matrix.rotateM(model, 0, (float) Math.sin(time * 1.4f + c) * 6f, 1, 0, 0);
+            Matrix.scaleM(model, 0, kNow * 1.3f, kNow * 1.3f, kNow * 1.3f);
+            drawLit(art.crate[(int) crateData[o + 2]]);
+        }
+    }
+
+    /** A dark tow line between two points (a stretched thin box). */
+    private void cable(float ax, float ay, float az, float bx, float by, float bz) {
+        float dx = bx - ax, dy = by - ay, dz = bz - az;
+        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len < 1e-3f) return;
+        Matrix.setIdentityM(model, 0);
+        Matrix.translateM(model, 0, ax, ay, az);
+        Matrix.rotateM(model, 0, (float) Math.toDegrees(Math.atan2(-dx, -dz)), 0, 1, 0);
+        Matrix.rotateM(model, 0, (float) Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz))), 1, 0, 0);
+        Matrix.scaleM(model, 0, kNow, kNow, len);
+        drawLit(art.cable);
+    }
+
+    private void fillOil() {
+        oilBuf.position(0);
+        int v = 0;
+        for (int i = 0; i < oilCount; i++) {
+            int o = i * 4;
+            float x = oilData[o], z = oilData[o + 1], r = oilData[o + 2];
+            quad(oilBuf, x, World.wave(x, z, time) + 0.03f, z, r, 0f, 0f, r, oilData[o + 3]);
+            v += 6;
+        }
+        oilVerts = v;
+        oilBuf.position(0);
+    }
+
+    /** Builds the camera-facing effect quads: smoke and glow, plus tracer streaks. */
+    private void fillFx() {
+        float rxv = view[0], ryv = view[4], rzv = view[8];
+        float uxv = view[1], uyv = view[5], uzv = view[9];
+        glowBuf.position(0);
+        smokeBuf.position(0);
+        int gv = 0, sv = 0;
+        float[][] c = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+        for (int i = 0; i < fxCount; i++) {
+            int o = i * 9;
+            float x = fxData[o], y = fxData[o + 1], z = fxData[o + 2], s = fxData[o + 3], a = fxData[o + 4];
+            boolean glow = fxData[o + 8] > 0.5f;
+            FloatBuffer buf = glow ? glowBuf : smokeBuf;
+            for (float[] k : c) {
+                buf.put(x + (rxv * k[0] + uxv * k[1]) * s).put(y + (ryv * k[0] + uyv * k[1]) * s)
+                        .put(z + (rzv * k[0] + uzv * k[1]) * s)
+                        .put(fxData[o + 5]).put(fxData[o + 6]).put(fxData[o + 7]).put(a).put(k[0]).put(k[1]);
+            }
+            if (glow) gv += 6; else sv += 6;
+        }
+        // tracer bullets: bright streaks along their flight
+        for (int sh = 0; sh < shotCount; sh++) {
+            int o = sh * 8;
+            if ((int) shotData[o] != Combat.SHOT_BULLET) continue;
+            float x = shotData[o + 1], y = shotData[o + 2], z = shotData[o + 3];
+            float vx = shotData[o + 5], vy = shotData[o + 6], vz = shotData[o + 7];
+            float tl = 0.022f;
+            float bx = x - vx * tl, by = y - vy * tl, bz = z - vz * tl;
+            gv += streak(glowBuf, x, y, z, bx, by, bz, 0.025f * kNow, 1f, 0.85f, 0.45f, 0.95f);
+        }
+        glowVerts = gv;
+        smokeVerts = sv;
+        glowBuf.position(0);
+        smokeBuf.position(0);
+    }
+
+    /** A ribbon from a to b facing the camera; returns the vertices added. */
+    private int streak(FloatBuffer buf, float ax, float ay, float az, float bx, float by, float bz, float w,
+                       float r, float g, float b, float a) {
+        float dx = bx - ax, dy = by - ay, dz = bz - az;
+        float cx = cam[0] - ax, cy = cam[1] - ay, cz = cam[2] - az;
+        float sx = dy * cz - dz * cy, sy = dz * cx - dx * cz, sz = dx * cy - dy * cx;
+        float l = (float) Math.sqrt(sx * sx + sy * sy + sz * sz);
+        if (l < 1e-6f) return 0;
+        sx *= w / l; sy *= w / l; sz *= w / l;
+        float[][] p = {{ax - sx, ay - sy, az - sz, -1}, {ax + sx, ay + sy, az + sz, 1},
+                {bx + sx, by + sy, bz + sz, 1}, {bx - sx, by - sy, bz - sz, -1}};
+        int[] order = {0, 1, 2, 0, 2, 3};
+        for (int k : order) buf.put(p[k][0]).put(p[k][1]).put(p[k][2]).put(r).put(g).put(b).put(a).put(p[k][3]).put(0f);
+        return 6;
+    }
+
+    private void drawFx(FloatBuffer buf, int verts, boolean additive) {
+        if (verts <= 0) return;
+        GLES20.glUseProgram(fxProg);
+        GLES20.glUniformMatrix4fv(fVP, 1, false, vp, 0);
+        GLES20.glEnable(GLES20.GL_BLEND);
+        if (additive) GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE);
+        else GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+        GLES20.glDepthMask(false);
+        buf.position(0);
+        GLES20.glEnableVertexAttribArray(fPos);
+        GLES20.glVertexAttribPointer(fPos, 3, GLES20.GL_FLOAT, false, FX_STRIDE * 4, buf);
+        buf.position(3);
+        GLES20.glEnableVertexAttribArray(fCol);
+        GLES20.glVertexAttribPointer(fCol, 4, GLES20.GL_FLOAT, false, FX_STRIDE * 4, buf);
+        buf.position(7);
+        GLES20.glEnableVertexAttribArray(fUV);
+        GLES20.glVertexAttribPointer(fUV, 2, GLES20.GL_FLOAT, false, FX_STRIDE * 4, buf);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, verts);
+        GLES20.glDisableVertexAttribArray(fPos);
+        GLES20.glDisableVertexAttribArray(fCol);
+        GLES20.glDisableVertexAttribArray(fUV);
+        buf.position(0);
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    /** Shield bubbles (and the EMP crackle) round the boats that have them. */
+    private void drawShields() {
+        boolean any = false;
+        for (int i = 0; i < boatCount; i++) if (!cbOut[i] && (cbShield[i] > 0 || cbEmp[i] > 0)) any = true;
+        if (!any) return;
+        GLES20.glUseProgram(litProg);
+        GLES20.glUniform3f(uLight, Scenery.LIGHT[0], Scenery.LIGHT[1], Scenery.LIGHT[2]);
+        GLES20.glUniform3f(uCam, cam[0], cam[1], cam[2]);
+        GLES20.glUniform3f(uFogColor, Scenery.FOG[0], Scenery.FOG[1], Scenery.FOG[2]);
+        GLES20.glUniform1f(uFogDensity, fogDensity());
+        GLES20.glUniform1f(uClip, 0f);
+        GLES20.glUniform1f(uShadowOn, 0f);
+        GLES20.glUniform1f(uSway, 0f);
+        material(1.2f, 60f, false);
+        GLES20.glEnable(GLES20.GL_BLEND);
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE);
+        GLES20.glDepthMask(false);
+        curVP = vp;
+        for (int i = 0; i < boatCount; i++) {
+            if (cbOut[i]) continue;
+            float k = boatHull[i] == Boat.UNLIMITED ? 6.2f : 0.95f;
+            if (cbShield[i] > 0) {
+                float flick = cbShield[i] < 1.5f ? (float) (0.5 + 0.5 * Math.sin(time * 30f)) : 1f;
+                GLES20.glUniform1f(uAlpha, 0.28f * flick);
+                Matrix.setIdentityM(model, 0);
+                Matrix.translateM(model, 0, cbPos[i][0], cbPos[i][1] + 0.1f * k, cbPos[i][2]);
+                Matrix.scaleM(model, 0, k * 0.75f, k * 0.5f, k);
+                drawLitTint(art.shield, 0.6f, 0.9f, 1f);
+            }
+            if (cbEmp[i] > 0) {
+                GLES20.glUniform1f(uAlpha, 0.18f + 0.18f * (float) Math.abs(Math.sin(time * 23f + i)));
+                Matrix.setIdentityM(model, 0);
+                Matrix.translateM(model, 0, cbPos[i][0], cbPos[i][1] + 0.1f * k, cbPos[i][2]);
+                Matrix.scaleM(model, 0, k * 0.6f, k * 0.4f, k * 0.8f);
+                drawLitTint(art.shield, 0.8f, 0.5f, 1f);
+            }
+        }
+        GLES20.glUniform1f(uAlpha, 1f);
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    /** Screen positions above each boat, for the HUD's name tags and health bars. */
+    private void projectBoats() {
+        for (int i = 0; i < boatCount; i++) {
+            float k = boatHull[i] == Boat.UNLIMITED ? 3.2f : 0.55f;
+            tmp4[0] = cbPos[i][0]; tmp4[1] = cbPos[i][1] + k; tmp4[2] = cbPos[i][2]; tmp4[3] = 1f;
+            Matrix.multiplyMV(tmp4b, 0, vp, 0, tmp4, 0);
+            float w = tmp4b[3];
+            boolean on = w > 0.01f && !cbOut[i];
+            float sx = on ? (tmp4b[0] / w * 0.5f + 0.5f) : -1f, sy = on ? (0.5f - tmp4b[1] / w * 0.5f) : -1f;
+            if (on && (sx < -0.1f || sx > 1.1f || sy < -0.1f || sy > 1.1f)) on = false;
+            screenTmp[i * 3] = sx;
+            screenTmp[i * 3 + 1] = sy;
+            screenTmp[i * 3 + 2] = on ? w : -1f;
+        }
+        synchronized (game) {
+            int n = Math.min(boatCount, game.boats.length);
+            if (game.screenXY.length < n * 3) game.screenXY = new float[Game.COLORS.length * 3];
+            System.arraycopy(screenTmp, 0, game.screenXY, 0, n * 3);
+        }
+    }
+
     private void drawCanopyGlass() {
         if (!cockpitView || lifeScene == null || playerIdx < 0) return;
         GLES20.glUseProgram(litProg);
@@ -1190,6 +1576,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         int v = 0;
         float sx = -Scenery.LIGHT[0] / Scenery.LIGHT[1], sz = -Scenery.LIGHT[2] / Scenery.LIGHT[1];
         for (int i = 0; i < boatCount; i++) {
+            if (combatNow && cbOut[i]) continue;
             float x = boatPose[i][0] + sx * 0.15f, z = boatPose[i][1] + sz * 0.15f, hd = boatPose[i][2];
             float fx = (float) -Math.sin(hd), fz = (float) -Math.cos(hd);
             float y = World.wave(x, z, time) + 0.04f;
@@ -1198,7 +1585,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             quad(shadowBuf, x, y, z, fx * 0.85f * k, fz * 0.85f * k, -fz * 0.42f * k * 1.5f, fx * 0.42f * k * 1.5f, 0.5f);
             v += 6;
         }
-        java.util.ArrayList<float[]> buoys = track.buoys;
+        java.util.ArrayList<float[]> buoys = buoyList;
         for (int i = 0; i < buoys.size() && v / 6 < Game.COLORS.length + 200; i++) {
             float[] bu = buoys.get(i);
             float x = bu[0] + sx * 0.3f, z = bu[1] + sz * 0.3f;

@@ -24,4 +24,8 @@ python3 maya/encode.py /tmp/maya/raw ../../app/src/main/assets/announcer
 python3 make_table.py ../../app/src/main/assets/announcer ../../app/src/main/java/com/rcboat/racing/AnnouncerClips.java
 ```
 
+The combat app's lines (`COMBAT` in `maya/lines.py`, keys starting with `c`) go in
+`app/src/combat/assets/announcer/` instead, so only RC Boat Combat carries them; build the
+duration table from both folders together.
+
 `maya/snacnp.py` is a small NumPy port of the SNAC decoder, so no PyTorch is needed.

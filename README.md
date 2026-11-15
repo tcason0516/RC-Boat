@@ -6,12 +6,41 @@ opponents around a buoy-marked course on a lake, with a lighthouse island in the
 ## Install on your phone
 
 1. On your Android phone, open the **[latest release](../../releases/tag/latest)** page.
-2. Tap **RCBoatRacing.apk** to download it.
+2. Tap **RCBoatRacing.apk** to download it (or **RCBoatCombat.apk** for the combat game).
 3. Open the downloaded file. If Android asks, allow your browser / file manager to
    *install unknown apps*, then tap **Install**.
 
 Every push to `main` rebuilds the APK automatically (see the *Actions* tab) and updates
 that release. New builds install over the old one.
+
+## RC Boat Combat (second app)
+
+**RCBoatCombat.apk**, on the same release page, is a second game built from this code: arm
+your boat and battle on the lake until one boat is left afloat. It installs alongside the
+racing game.
+
+- **Weapons** (pick one; the computer boats each get a different one):
+  Machine Gun (auto-aiming turret), Flamethrower (sets boats on fire), Bow Drill (ram them
+  to punch holes, they fill with water and sink), Torpedoes (homing, holes below the
+  waterline), Harpoon (spears a boat and tows it), Mine Layer (magnetic mines dropped
+  behind you), Water Cannon (knocks boats away, swamps them, puts out fires) and
+  Rocket Pod (salvos of homing rockets).
+- **Damage:** a hull bar, plus water: every hole lets water in faster than the bilge pump
+  can clear it, the boat slows as it fills and sinks when full. Fire burns on for a few
+  seconds. Ramming hurts both boats.
+- **Crates** float on the lake: Repair Kit, Bilge Pump and Double Damage work at once;
+  Nitro, Shield, EMP Blast, Oil Slick (set it alight with fire or a blast) and Smoke
+  Screen are kept for the **SPECIAL** button.
+- **Controls:** the same sticks as the racing game, plus **FIRE** (auto fire is on by
+  default) and **SPECIAL**. Turrets aim themselves at the nearest boat in their arc.
+- **Longer games:** best of 3 or 5 rounds, a *Battle length* setting (Quick, Normal,
+  Epic) that makes hulls tougher, Survival mode (wave after wave of tougher boats, with
+  your best wave saved), and Sudden Death leaks so every round ends. When you're out you
+  watch the rest of the round, or skip it.
+- **Arenas:** Island Lake, Open Lake and Buoy Maze for RC boats; on the big lake the
+  Unlimited hydroplanes fight inside a ring of buoys (Big Lake, Buoy Maze).
+
+Sound effects are synthesised by the app; the announcer has its own combat lines.
 
 ## Two kinds of racing
 

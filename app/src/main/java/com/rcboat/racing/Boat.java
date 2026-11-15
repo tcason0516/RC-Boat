@@ -119,6 +119,33 @@ final class Boat {
     /** Life size: attitude and height with the small-wave chatter filtered out. */
     float lpPitch, lpRoll, lpY;
     private boolean lpInit;
+
+    // ---- combat (RC Boat Combat; see Combat) ----
+    int weapon;                // Weapons.* primary weapon
+    float hp, maxHp;           // hull strength
+    int holes;                 // holes below the waterline (each lets water in)
+    float water;               // water in the hull, 0..1 (1 = swamped and sinking)
+    float burn;                // seconds of fire left
+    float shield, nitro, emp, oiled, power, smokeT;   // effect timers (s)
+    int special = -1;          // pickup held for the SPECIAL button (Weapons.PU_*), -1 none
+    float ammo, reload, cool;  // magazine, reload timer, time to the next shot
+    boolean out;               // eliminated this round
+    float sinkT;               // time since going down (sinking animation)
+    float sinkY, sinkPitch, sinkRoll;
+    int place, kills, wins;
+    Boat lastHitBy;
+    float lastHitT = -99f;
+    float aimYaw;              // turret direction relative to the bow (rad)
+    Boat aimAt;                // what the turret is tracking
+    Boat tether;               // harpooned boat being towed
+    float tetherLen, tetherT;
+    float gripMul = 1f, turnMul = 1f, baseAccel;
+    boolean fire, useSpecial;  // trigger and special button this frame
+    // combat AI
+    Boat target;
+    int aiMode;
+    float aiTimer, aiOrbit = 1f, aiStuck, aiReverse;
+    float aimJitter;
     Boat(int id, String name, float[] color, boolean isPlayer, int hull, Random rnd) {
         this.id = id;
         this.hull = hull;
@@ -274,11 +301,11 @@ final class Boat {
         vf -= drag * vf * Math.abs(vf) * dt;
         vf -= vf * waterDrag * dt;             // water friction
         if (vf < -REVERSE_MAX) vf = -REVERSE_MAX;
-        vs *= (float) Math.exp(-grip * dt);    // side grip (lets boats slide a little)
+        vs *= (float) Math.exp(-grip * gripMul * dt);    // side grip (lets boats slide a little)
 
         float authority = clamp(vf / 3.5f, -1f, 1f);
         float rate = turnRate * (1f - 0.25f * clamp(vf / top, 0f, 1f));
-        float targetYaw = -steer * rate * authority;
+        float targetYaw = -steer * rate * authority * turnMul;
         yawRate += (targetYaw - yawRate) * Math.min(1f, dt * 7f);
         heading = wrapAngle(heading + yawRate * dt);
 
@@ -322,6 +349,15 @@ final class Boat {
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(p), 1, 0, 0);
         android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(rl), 0, 0, 1);
         if (sizeScale != 1f) android.opengl.Matrix.scaleM(m, 0, sizeScale, sizeScale, sizeScale);
+        if (sinkT > 0f) {
+            // going down: settles, then slips under stern or bow first
+            android.opengl.Matrix.setIdentityM(m, 0);
+            android.opengl.Matrix.translateM(m, 0, x, yy - sinkY, z);
+            android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(heading), 0, 1, 0);
+            android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(p + sinkPitch), 1, 0, 0);
+            android.opengl.Matrix.rotateM(m, 0, (float) Math.toDegrees(rl + sinkRoll), 0, 0, 1);
+            if (sizeScale != 1f) android.opengl.Matrix.scaleM(m, 0, sizeScale, sizeScale, sizeScale);
+        }
     }
 
     /**

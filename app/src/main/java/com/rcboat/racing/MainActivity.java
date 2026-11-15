@@ -18,6 +18,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
+        Game.combatBuild = BuildConfig.COMBAT;
         game = new Game();
         game.records.load(getSharedPreferences("rcboat", MODE_PRIVATE).getString("records", ""));
         game.records.dirty = false;

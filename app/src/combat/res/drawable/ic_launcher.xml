@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- dusk sky and dark water -->
+    <path android:fillColor="#3B2A4F" android:pathData="M0,0h108v108h-108z" />
+    <path android:fillColor="#7A3B3B" android:pathData="M0,40h108v22h-108z" />
+    <path android:fillColor="#14324A" android:pathData="M0,62h108v46h-108z" />
+    <!-- explosion -->
+    <path android:fillColor="#FF9800" android:pathData="M82,22 l5,10 l11,-3 l-6,9 l9,7 l-11,1 l1,11 l-8,-7 l-7,8 l-1,-11 l-11,-1 l9,-7 l-5,-10 l10,4z" />
+    <path android:fillColor="#FFEB3B" android:pathData="M83,32 l3,5 l6,-1 l-4,5 l4,4 l-6,0 l-1,6 l-3,-5 l-5,3 l1,-6 l-5,-3 l6,-1z" />
+    <!-- waves -->
+    <path android:fillColor="#9FC4DE" android:pathData="M10,80 q8,-5 16,0 q8,5 16,0 q8,-5 16,0 l0,3 q-8,5 -16,0 q-8,-5 -16,0 q-8,5 -16,0z" />
+    <!-- boat hull -->
+    <path android:fillColor="#546E7A" android:pathData="M14,60 L70,60 L82,52 L68,68 L20,68 Z" />
+    <path android:fillColor="#263238" android:pathData="M32,60 L40,51 L54,51 L58,60 Z" />
+    <!-- gun turret and barrel -->
+    <path android:fillColor="#37474F" android:pathData="M58,53 h10 v7 h-10z" />
+    <path android:fillColor="#212121" android:pathData="M66,54.5 L84,49 L85,51.5 L67,57z" />
+    <!-- tracer -->
+    <path android:fillColor="#FFD54F" android:pathData="M88,47 L100,43.5 L100.6,45 L88.6,48.5z" />
+</vector>

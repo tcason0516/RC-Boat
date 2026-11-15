@@ -61,11 +61,18 @@ final class HudView extends View {
     private int annSeq;
     private MediaPlayer voice;
 
+    // combat: sound effects, and the FIRE / SPECIAL buttons (FIRE is held down)
+    private final Sfx sfx;
+    private int firePointer = -1;
+    private float fireX, fireY, fireR, specX, specY, specR;
+    private boolean combatControls;
+
     HudView(Context ctx, Game game) {
         super(ctx);
         this.game = game;
         stroke.setStyle(Paint.Style.STROKE);
         text.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        sfx = Game.combatBuild ? new Sfx(ctx) : null;
     }
 
     // ------------------------------------------------------------------ drawing
@@ -85,11 +92,22 @@ final class HudView extends View {
             }
             switch (game.state) {
                 case MENU:
-                    drawMenu(c, w, h);
+                    if (Game.combatBuild) drawCombatMenu(c, w, h);
+                    else drawMenu(c, w, h);
                     break;
                 default:
-                    drawRace(c, w, h);
+                    if (Game.combatBuild) drawCombat(c, w, h);
+                    else drawRace(c, w, h);
                     break;
+            }
+            if (sfx != null) {
+                Combat cb = game.combat;
+                boolean on = game.soundOn && !game.paused;
+                while (cb.sfxTail != cb.sfxHead) {
+                    int i = cb.sfxTail & 63;
+                    if (on) sfx.play(cb.sfxId[i], cb.sfxVol[i]);
+                    cb.sfxTail++;
+                }
             }
         }
         if (newClip != null) playVoice(newClip);
@@ -731,6 +749,457 @@ final class HudView extends View {
         right.release();
         game.inThrottle = 0;
         game.inSteer = 0;
+        firePointer = -1;
+        game.inFire = false;
+    }
+
+    // ------------------------------------------------------------------ combat menus
+
+    private void drawCombatMenu(Canvas c, int w, int h) {
+        releaseSticks();
+        if (game.menuScreen == Game.MENU_MAIN) { drawCombatMain(c, w, h); return; }
+        drawCombatSetup(c, w, h);
+    }
+
+    /** The first screen of the combat app: RC boats or life-size hydroplanes. */
+    private void drawCombatMain(Canvas c, int w, int h) {
+        float pw = Math.min(w * 0.9f, 170 * u), ph = 80 * u;
+        float px = (w - pw) / 2f, py = (h - ph) / 2f;
+        panel(c, px, py, pw, ph);
+        textC(c, "RC BOAT COMBAT", w / 2f, py + 12 * u, 8 * u, Color.WHITE);
+        textC(c, "Arm your boat. Last one afloat wins.", w / 2f, py + 19 * u, 3.6f * u, 0xFFFFB74D);
+        float cw = (pw - 15 * u) / 2f, ch = 48 * u, cy = py + 25 * u;
+        final Game g = game;
+        modeCard(c, px + 5 * u, cy, cw, ch, "RC BOATS", "1/8 scale battles on the lake",
+                "Guns, torpedoes, drills, mines and more", 0xFF2E7D9E,
+                () -> { g.setMode(false); g.combat.arena = 0; g.startDemo(); g.menuScreen = Game.MENU_RC; });
+        modeCard(c, px + 10 * u + cw, cy, cw, ch, "LIFE SIZE", "Unlimited hydroplanes at war",
+                "A ring of buoys on the big lake", 0xFFB5482A,
+                () -> { g.setMode(true); g.combat.arena = 0; g.startDemo(); g.menuScreen = Game.MENU_LIFE; });
+    }
+
+    /** Battle settings: mode, arena, rounds, length; weapon, boat and options. */
+    private void drawCombatSetup(Canvas c, int w, int h) {
+        float pw = Math.min(w * 0.94f, 190 * u), ph = 94 * u;
+        float px = (w - pw) / 2f, py = (h - ph) / 2f;
+        panel(c, px, py, pw, ph);
+        final Game g = game;
+        final Combat cb = g.combat;
+        textC(c, g.lifeSize ? "LIFE SIZE COMBAT" : "RC BOAT COMBAT", w / 2f, py + 9 * u, 6.5f * u, Color.WHITE);
+        backButton(c, px, py);
+        boolean surv = cb.mode == Combat.MODE_SURVIVAL;
+        String l1 = Weapons.NAMES[cb.weapon] + ": " + Weapons.INFO[cb.weapon];
+        String l2;
+        if (surv) {
+            Float best = g.records.get(cb.survivalKey());
+            l2 = "Wave after wave of tougher boats" + (best != null ? "  \u2022  Your best: " + Math.round(best) + " waves" : "");
+        } else {
+            int r = Combat.ROUNDS[cb.roundsIdx];
+            l2 = "Last boat afloat wins the round" + (r > 1 ? "  \u2022  First to " + cb.winsNeeded() + " wins the match" : "");
+        }
+        textFit(c, l1, w / 2f, py + 15.5f * u, 3.2f * u, pw - 8 * u, 0xFFFFCC80);
+        textFit(c, l2, w / 2f, py + 19.5f * u, 3.2f * u, pw - 8 * u, 0xFF9FD8FF);
+
+        float gap = 5 * u;
+        float colW = (pw - 6 * u - gap) / 2f;
+        float x0 = px + 3 * u, x1 = x0 + colW + gap;
+        float rowH = 7.6f * u;
+        float y0 = py + 27 * u;
+        heading(c, x0, py + 24.2f * u, colW, "BATTLE");
+        heading(c, x1, py + 24.2f * u, colW, "BOAT & WEAPON");
+        String[] arenas = cb.arenas();
+        int nA = arenas.length, nW = Weapons.COUNT, nH = Boat.RC_HULLS;
+        row(c, x0, y0, colW, rowH, "Mode", Combat.MODE_NAMES[cb.mode],
+                () -> cb.mode = 1 - cb.mode, () -> cb.mode = 1 - cb.mode);
+        row(c, x0, y0 + rowH, colW, rowH, "Arena", arenas[Math.min(cb.arena, nA - 1)],
+                () -> { cb.arena = (cb.arena + nA - 1) % nA; g.startDemo(); },
+                () -> { cb.arena = (cb.arena + 1) % nA; g.startDemo(); });
+        row(c, x0, y0 + 2 * rowH, colW, rowH, "Opponents", surv ? "Waves" : String.valueOf(g.opponents),
+                () -> { if (!surv) g.opponents = Math.max(1, g.opponents - 1); },
+                () -> { if (!surv) g.opponents = Math.min(Game.MAX_OPPONENTS, g.opponents + 1); });
+        int rr = Combat.ROUNDS[cb.roundsIdx];
+        row(c, x0, y0 + 3 * rowH, colW, rowH, "Rounds", surv ? "-" : rr == 1 ? "1 round" : "Best of " + rr,
+                () -> { if (!surv) cb.roundsIdx = (cb.roundsIdx + 2) % 3; },
+                () -> { if (!surv) cb.roundsIdx = (cb.roundsIdx + 1) % 3; });
+        row(c, x0, y0 + 4 * rowH, colW, rowH, "Battle length", Combat.LENGTH_NAMES[cb.length],
+                () -> cb.length = Math.max(0, cb.length - 1), () -> cb.length = Math.min(2, cb.length + 1));
+        row(c, x0, y0 + 5 * rowH, colW, rowH, "Difficulty", Game.DIFFICULTY[g.difficulty],
+                () -> g.difficulty = Math.max(0, g.difficulty - 1),
+                () -> g.difficulty = Math.min(2, g.difficulty + 1));
+        row(c, x0, y0 + 6 * rowH, colW, rowH, "Crates", cb.pickupsOn ? "On" : "Off",
+                () -> cb.pickupsOn = !cb.pickupsOn, () -> cb.pickupsOn = !cb.pickupsOn);
+
+        row(c, x1, y0, colW, rowH, "Weapon", Weapons.NAMES[cb.weapon],
+                () -> cb.weapon = (cb.weapon + nW - 1) % nW, () -> cb.weapon = (cb.weapon + 1) % nW);
+        if (g.lifeSize) row(c, x1, y0 + rowH, colW, rowH, "Boat", "Unlimited", () -> { }, () -> { });
+        else row(c, x1, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
+                () -> g.hull = (g.hull + nH - 1) % nH, () -> g.hull = (g.hull + 1) % nH);
+        row(c, x1, y0 + 2 * rowH, colW, rowH, "Auto fire", cb.autoFire ? "On" : "Off",
+                () -> cb.autoFire = !cb.autoFire, () -> cb.autoFire = !cb.autoFire);
+        String camName = g.view == Game.VIEW_FPV ? (g.lifeSize ? "Cockpit" : "Boat (FPV)")
+                : g.view == Game.VIEW_CHASE ? "Chase" : "Shore";
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Camera", camName,
+                () -> g.view = cycleView(g, -1), () -> g.view = cycleView(g, 1));
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", g.dualStick ? "Two sticks" : "One stick",
+                () -> g.dualStick = !g.dualStick, () -> g.dualStick = !g.dualStick);
+        String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
+        row(c, x1, y0 + 5 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
+
+        float bw = 56 * u, bh = 10 * u;
+        button(c, (w - bw) / 2f, py + ph - bh - 2.5f * u, bw, bh, "START BATTLE", 0xFFC0392B, 5.2f * u,
+                game::startRace);
+    }
+
+    /** Combat camera choices: chase and the boat's own view (the shore view on the RC lake). */
+    private static int cycleView(Game g, int dir) {
+        int[] order = g.lifeSize ? new int[]{Game.VIEW_CHASE, Game.VIEW_FPV}
+                : new int[]{Game.VIEW_CHASE, Game.VIEW_FPV, Game.VIEW_SHORE};
+        int i = 0;
+        for (int k = 0; k < order.length; k++) if (order[k] == g.view) i = k;
+        return order[(i + dir + order.length) % order.length];
+    }
+
+    // ------------------------------------------------------------------ combat HUD
+
+    private void drawCombat(Canvas c, int w, int h) {
+        Boat p = game.player;
+        if (p == null) return;
+        Combat cb = game.combat;
+        Boat[] boats = game.boats;
+
+        nameTags(c, w, h, boats, p);
+        statusPanel(c, p);
+
+        // ---- top buttons ----
+        float bw = 15 * u, bh = 9 * u, gap = 2 * u;
+        float bx = w / 2f - (bw * 3 + gap * 2) / 2f;
+        String vn = game.view == Game.VIEW_FPV ? (game.lifeSize ? "COCKPIT" : "BOAT")
+                : Game.VIEW_SHORT[game.view];
+        button(c, bx, 2 * u, bw, bh, vn, 0xCC24435E, 3.6f * u, this::combatView);
+        button(c, bx + bw + gap, 2 * u, bw, bh, "PAUSE", 0xCC24435E, 3.6f * u, () -> game.setPaused(true));
+        final Game g = game;
+        button(c, bx + 2 * (bw + gap), 2 * u, bw, bh, g.soundOn ? "SOUND" : "MUTED", 0xCC24435E, 3.6f * u,
+                () -> g.soundOn = !g.soundOn);
+        String info;
+        int left = cb.aliveCount();
+        if (cb.mode == Combat.MODE_SURVIVAL) {
+            info = "WAVE " + cb.wave + "  \u2022  " + Math.max(0, left - (p.out ? 0 : 1)) + " ENEMIES LEFT  \u2022  "
+                    + p.kills + " KILLS";
+        } else {
+            int r = Combat.ROUNDS[cb.roundsIdx];
+            info = (r > 1 ? "ROUND " + cb.round + "  \u2022  FIRST TO " + cb.winsNeeded() + "  \u2022  " : "")
+                    + left + " BOATS AFLOAT";
+        }
+        textShadow(c, info, w / 2f, 15.5f * u, 3.4f * u, 0xFFFFE0B2);
+        if (cb.suddenDeath && !cb.roundOver) textShadow(c, "SUDDEN DEATH", w / 2f, 20f * u, 3.4f * u, 0xFFFF5252);
+
+        radar(c, w - 2 * u - 34 * u, 2 * u, 34 * u, boats, p);
+        // ---- kill feed ----
+        float fy = 41 * u;
+        for (int i = 0; i < cb.feed.size(); i++) {
+            float a = Math.min(1f, cb.feedT.get(i) / 1f);
+            int col = ((int) (a * 255) << 24) | 0xFFFFFF;
+            text.setTextAlign(Paint.Align.RIGHT);
+            text.setTextSize(3.1f * u);
+            text.setColor((int) (a * 0x99) << 24);
+            c.drawText(cb.feed.get(i), w - 2.6f * u, fy + 0.15f * u, text);
+            text.setColor(col);
+            c.drawText(cb.feed.get(i), w - 2.8f * u, fy, text);
+            fy += 4.2f * u;
+        }
+
+        // ---- centre messages ----
+        if (game.state == Game.State.COUNTDOWN) {
+            int num = Math.min(3, (int) Math.ceil(game.countdown));
+            textShadow(c, String.valueOf(Math.max(1, num)), w / 2f, h * 0.45f, 26 * u, 0xFFFFD54F);
+            textShadow(c, cb.mode == Combat.MODE_SURVIVAL ? "SURVIVE!" : "ROUND " + cb.round,
+                    w / 2f, h * 0.45f + 10 * u, 5 * u, Color.WHITE);
+        } else if (game.messageTime > 0 && game.message.length() > 0) {
+            textShadow(c, game.message, w / 2f, h * 0.34f, 8 * u, Color.WHITE);
+        }
+
+        // ---- speed ----
+        if (!p.out) {
+            float mph = p.speed() * 2.23694f;
+            textShadow(c, String.valueOf(Math.round(mph)), w / 2f, h - 8 * u, 9 * u, Color.WHITE);
+            textShadow(c, "MPH", w / 2f, h - 3 * u, 3.4f * u, 0xFFB8D4E8);
+        }
+
+        // ---- controls ----
+        boolean active = (game.state == Game.State.RACING || game.state == Game.State.COUNTDOWN)
+                && !game.paused && !p.out && !cb.roundOver;
+        layoutSticks(w, h);
+        layoutCombatButtons(w, h);
+        combatControls = active;
+        if (active) {
+            drawSticks(c);
+            drawCombatButtons(c, p);
+        } else {
+            releaseSticks();
+        }
+
+        // ---- overlays ----
+        if (game.paused) {
+            drawPause(c, w, h);
+        } else if (cb.roundOver && cb.roundOverT > 2.2f) {
+            drawRoundResults(c, w, h);
+        } else if (p.out && !cb.roundOver) {
+            Boat sp = game.viewBoat();
+            panel(c, w / 2f - 42 * u, h - 30 * u, 84 * u, 16 * u);
+            textC(c, "YOU'RE OUT  \u2022  " + Game.ordinal(p.place) + " PLACE", w / 2f, h - 24 * u, 3.8f * u, 0xFFFF8A65);
+            textC(c, sp != null && sp != p ? "Watching " + sp.name : "", w / 2f, h - 19 * u, 3.2f * u, 0xFFB8D4E8);
+            if (cb.mode == Combat.MODE_LAST)
+                button(c, w / 2f + 44 * u, h - 30 * u, 22 * u, 16 * u, "SKIP \u203A", 0xFF35506A, 4f * u, cb::skipRound);
+        }
+    }
+
+    private void combatView() {
+        game.view = cycleView(game, 1);
+        game.setMessage((game.view == Game.VIEW_FPV ? (game.lifeSize ? "COCKPIT" : "BOAT")
+                : Game.VIEW_SHORT[game.view]) + " VIEW", 1.2f);
+    }
+
+    /** Hull, water, weapon and specials for the player's boat. */
+    private void statusPanel(Canvas c, Boat p) {
+        float x = 2 * u, y = 2 * u, pw = 46 * u, ph = 34 * u;
+        panel(c, x, y, pw, ph);
+        float bx = x + 3 * u, bw = pw - 6 * u, bhh = 3.2f * u;
+        // hull
+        float hp = Math.max(0f, p.hp / p.maxHp);
+        label(c, "HULL", bx, y + 5 * u);
+        bar(c, bx, y + 6.2f * u, bw, bhh, hp, hp > 0.5f ? 0xFF4CAF50 : hp > 0.25f ? 0xFFFFC107 : 0xFFF44336);
+        // water in the hull
+        String wl = p.holes > 0 ? "WATER  \u2022  " + p.holes + (p.holes == 1 ? " HOLE" : " HOLES") : "WATER";
+        label(c, wl, bx, y + 13.4f * u);
+        bar(c, bx, y + 14.6f * u, bw, bhh, p.water, p.water > 0.6f ? 0xFFE53935 : 0xFF29B6F6);
+        // weapon
+        float am = p.reload > 0 ? 1f - p.reload / Math.max(0.01f, Weapons.RELOAD[p.weapon])
+                : p.ammo / Weapons.MAG[p.weapon];
+        String wn = Weapons.SHORT[p.weapon] + (p.reload > 0 ? "  \u2022  RELOADING" : "");
+        if (p.weapon == Weapons.DRILL) { am = 1f; wn = "DRILL  \u2022  RAM THEM"; }
+        label(c, wn, bx, y + 21.8f * u);
+        bar(c, bx, y + 23f * u, bw, bhh, am, p.reload > 0 ? 0xFF8D6E63 : 0xFFFFA726);
+        // effects
+        StringBuilder fx = new StringBuilder();
+        if (p.shield > 0) fx.append("SHIELD ").append((int) Math.ceil(p.shield)).append("  ");
+        if (p.nitro > 0) fx.append("NITRO  ");
+        if (p.power > 0) fx.append("2X DMG ").append((int) Math.ceil(p.power)).append("  ");
+        if (p.burn > 0) fx.append("ON FIRE  ");
+        if (p.emp > 0) fx.append("STALLED  ");
+        if (p.oiled > 0) fx.append("OIL  ");
+        if (p.tether != null) fx.append("TOWING  ");
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(2.9f * u);
+        text.setColor(0xFFFFE082);
+        c.drawText(fx.toString(), bx, y + 31f * u, text);
+    }
+
+    private void label(Canvas c, String s, float x, float y) {
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(2.8f * u);
+        text.setColor(0xFFB8D4E8);
+        c.drawText(s, x, y, text);
+    }
+
+    private void bar(Canvas c, float x, float y, float bw, float bh, float f, int color) {
+        rect.set(x, y, x + bw, y + bh);
+        fill.setColor(0x66000000);
+        c.drawRoundRect(rect, bh / 2, bh / 2, fill);
+        f = Math.max(0f, Math.min(1f, f));
+        if (f > 0.01f) {
+            rect.set(x, y, x + bw * f, y + bh);
+            fill.setColor(color);
+            c.drawRoundRect(rect, bh / 2, bh / 2, fill);
+        }
+    }
+
+    /** Names and hull bars over the other boats. */
+    private void nameTags(Canvas c, int w, int h, Boat[] boats, Boat p) {
+        float[] sxy = game.screenXY;
+        for (int i = 0; i < boats.length && i * 3 + 2 < sxy.length; i++) {
+            Boat b = boats[i];
+            if (b.out || b == p || sxy[i * 3 + 2] <= 0) continue;
+            float x = sxy[i * 3] * w, y = sxy[i * 3 + 1] * h;
+            float depth = sxy[i * 3 + 2];
+            float k = game.lifeSize ? 7.5f : 1f;
+            float sc = Math.max(0.6f, Math.min(1.2f, 14f * k / Math.max(1f, depth)));
+            float bw = 13 * u * sc, bh = 1.4f * u * sc;
+            bar(c, x - bw / 2, y, bw, bh, b.hp / b.maxHp, 0xFFE53935);
+            if (b.water > 0.05f) bar(c, x - bw / 2, y + bh * 1.4f, bw, bh * 0.7f, b.water, 0xFF29B6F6);
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(2.6f * u * sc);
+            text.setColor(0xCC000000);
+            c.drawText(b.name, x + 0.15f * u, y - 0.85f * u, text);
+            fill.setColor(Color.rgb((int) (b.r * 255), (int) (b.g * 255), (int) (b.b * 255)));
+            text.setColor(Color.WHITE);
+            c.drawText(b.name, x, y - 1f * u, text);
+        }
+    }
+
+    /** A small radar: boats (team colours), crates and mines around the player. */
+    private void radar(Canvas c, float x, float y, float size, Boat[] boats, Boat p) {
+        float cx = x + size / 2f, cy = y + size / 2f, r = size / 2f;
+        fill.setColor(0xB0102230);
+        c.drawCircle(cx, cy, r, fill);
+        stroke.setColor(0x55FFFFFF);
+        stroke.setStrokeWidth(0.3f * u);
+        c.drawCircle(cx, cy, r, stroke);
+        c.drawCircle(cx, cy, r * 0.5f, stroke);
+        Boat me = game.viewBoat() != null ? game.viewBoat() : p;
+        float k = game.lifeSize ? 7.5f : 1f;
+        float range = 45f * k;
+        float hd = me.heading;
+        float cs = (float) Math.cos(hd), sn = (float) Math.sin(hd);
+        Combat cb = game.combat;
+        for (Combat.Crate cr : cb.crates) {
+            float[] q = radarPos(cr.x - me.x, cr.z - me.z, cs, sn, range, r);
+            if (q == null) continue;
+            float[] col = Weapons.PU_COLOR[cr.kind];
+            fill.setColor(Color.rgb((int) (col[0] * 255), (int) (col[1] * 255), (int) (col[2] * 255)));
+            c.drawRect(cx + q[0] - 0.8f * u, cy + q[1] - 0.8f * u, cx + q[0] + 0.8f * u, cy + q[1] + 0.8f * u, fill);
+        }
+        fill.setColor(0xFFFF3D00);
+        for (Combat.Mine m : cb.mines) {
+            float[] q = radarPos(m.x - me.x, m.z - me.z, cs, sn, range, r);
+            if (q != null) c.drawCircle(cx + q[0], cy + q[1], 0.5f * u, fill);
+        }
+        for (Boat b : boats) {
+            if (b.out || b == me) continue;
+            float[] q = radarPos(b.x - me.x, b.z - me.z, cs, sn, range, r);
+            if (q == null) {
+                // off the edge: a mark on the rim
+                float dx = b.x - me.x, dz = b.z - me.z;
+                float rx = dx * cs - dz * sn, rz = dx * sn + dz * cs;
+                float l = (float) Math.sqrt(rx * rx + rz * rz);
+                q = new float[]{rx / l * r * 0.95f, rz / l * r * 0.95f};
+            }
+            fill.setColor(Color.rgb((int) (b.r * 255), (int) (b.g * 255), (int) (b.b * 255)));
+            c.drawCircle(cx + q[0], cy + q[1], 1.3f * u, fill);
+        }
+        // me: an arrow pointing up
+        path.reset();
+        path.moveTo(cx, cy - 2f * u);
+        path.lineTo(cx + 1.4f * u, cy + 1.5f * u);
+        path.lineTo(cx - 1.4f * u, cy + 1.5f * u);
+        path.close();
+        fill.setColor(Color.WHITE);
+        c.drawPath(path, fill);
+    }
+
+    private static float[] radarPos(float dx, float dz, float cs, float sn, float range, float r) {
+        // rotate so the boat's heading points up the radar
+        float rx = dx * cs - dz * sn, rz = dx * sn + dz * cs;
+        float d = (float) Math.sqrt(rx * rx + rz * rz);
+        if (d > range) return null;
+        return new float[]{rx / range * r, rz / range * r};
+    }
+
+    private void layoutCombatButtons(int w, int h) {
+        fireR = 9.5f * u;
+        specR = 7f * u;
+        if (game.dualStick) {
+            fireX = w - 13 * u;
+            fireY = right.cy - right.radius - 17 * u;
+        } else {
+            fireX = w - 16 * u;
+            fireY = h - 20 * u;
+        }
+        specX = fireX - fireR - specR - 4 * u;
+        specY = fireY + 4 * u;
+    }
+
+    private void drawCombatButtons(Canvas c, Boat p) {
+        boolean held = firePointer >= 0;
+        fill.setColor(held ? 0xEEFF5252 : 0xAAD32F2F);
+        c.drawCircle(fireX, fireY, fireR, fill);
+        stroke.setColor(0xCCFFFFFF);
+        stroke.setStrokeWidth(0.5f * u);
+        c.drawCircle(fireX, fireY, fireR, stroke);
+        textC(c, "FIRE", fireX, fireY + 1.3f * u, 3.6f * u, Color.WHITE);
+        if (game.combat.autoFire) textC(c, "AUTO", fireX, fireY + 4.6f * u, 2.3f * u, 0xCCFFFFFF);
+        boolean has = p.special >= 0;
+        float[] col = has ? Weapons.PU_COLOR[p.special] : new float[]{0.3f, 0.35f, 0.4f};
+        fill.setColor(Color.argb(has ? 220 : 110, (int) (col[0] * 255), (int) (col[1] * 255), (int) (col[2] * 255)));
+        c.drawCircle(specX, specY, specR, fill);
+        c.drawCircle(specX, specY, specR, stroke);
+        textC(c, has ? Weapons.PU_SHORT[p.special] : "SPECIAL", specX, specY + 1f * u, has ? 2.9f * u : 2.4f * u,
+                has ? Color.WHITE : 0x99FFFFFF);
+    }
+
+    /** End of a round, a match or a survival run. */
+    private void drawRoundResults(Canvas c, int w, int h) {
+        Combat cb = game.combat;
+        fill.setColor(0x66000000);
+        c.drawRect(0, 0, w, h, fill);
+        Boat[] bs = game.boats.clone();
+        boolean surv = cb.mode == Combat.MODE_SURVIVAL;
+        java.util.Arrays.sort(bs, (a, b) -> {
+            if (!surv && b.wins != a.wins) return b.wins - a.wins;
+            if (a.place != b.place) return (a.place == 0 ? 99 : a.place) - (b.place == 0 ? 99 : b.place);
+            return b.kills - a.kills;
+        });
+        int n = surv ? 1 : bs.length;
+        float rowH = 7.5f * u;
+        float pw = Math.min(w * 0.9f, 120 * u), ph = 40 * u + n * rowH;
+        float px = (w - pw) / 2f, py = (h - ph) / 2f;
+        panel(c, px, py, pw, ph);
+        String title;
+        if (surv) title = "GAME OVER  \u2022  WAVE " + cb.wave;
+        else if (cb.matchOver) title = cb.matchWinner != null ? (cb.matchWinner.isPlayer ? "YOU WIN THE MATCH!"
+                : cb.matchWinner.name.toUpperCase() + " WINS THE MATCH") : "MATCH OVER";
+        else title = "ROUND " + cb.round + "  \u2022  " + (cb.roundWinner == null ? "NO SURVIVORS"
+                : cb.roundWinner.isPlayer ? "YOU WIN!" : cb.roundWinner.name.toUpperCase() + " WINS");
+        textC(c, title, w / 2f, py + 10 * u, 6 * u, Color.WHITE);
+        textFit(c, cb.resultLine, w / 2f, py + 16 * u, 3.4f * u, pw - 8 * u, 0xFFFFE082);
+        float y = py + 20 * u;
+        if (!surv) {
+            text.setTextSize(2.8f * u);
+            text.setColor(0xFF7FB6DA);
+            text.setTextAlign(Paint.Align.LEFT);
+            c.drawText("BOAT", px + 12 * u, y + 2 * u, text);
+            c.drawText("WEAPON", px + 52 * u, y + 2 * u, text);
+            text.setTextAlign(Paint.Align.RIGHT);
+            c.drawText("KILLS", px + pw - 26 * u, y + 2 * u, text);
+            c.drawText("WINS", px + pw - 6 * u, y + 2 * u, text);
+            y += 3 * u;
+        }
+        for (int i = 0; i < n; i++) {
+            Boat b = surv ? game.player : bs[i];
+            if (b.isPlayer) {
+                fill.setColor(0x33FFFFFF);
+                c.drawRect(px + 3 * u, y, px + pw - 3 * u, y + rowH, fill);
+            }
+            float ty = y + rowH * 0.7f;
+            fill.setColor(Color.rgb((int) (b.r * 255), (int) (b.g * 255), (int) (b.b * 255)));
+            c.drawCircle(px + 8 * u, y + rowH / 2f, 2 * u, fill);
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTextSize(4.2f * u);
+            text.setColor(b.out && !cb.roundOver ? 0xFF9FB4C4 : Color.WHITE);
+            c.drawText(b.name, px + 12 * u, ty, text);
+            text.setTextSize(3.4f * u);
+            text.setColor(0xFFFFCC80);
+            c.drawText(Weapons.NAMES[b.weapon], px + 52 * u, ty, text);
+            text.setTextAlign(Paint.Align.RIGHT);
+            text.setTextSize(4.2f * u);
+            text.setColor(Color.WHITE);
+            c.drawText(String.valueOf(b.kills), px + pw - 26 * u, ty, text);
+            if (!surv) {
+                StringBuilder st = new StringBuilder();
+                for (int k = 0; k < b.wins; k++) st.append('\u2605');
+                text.setColor(0xFFFFD54F);
+                c.drawText(st.length() > 0 ? st.toString() : "-", px + pw - 6 * u, ty, text);
+            }
+            y += rowH;
+        }
+        float bw = 44 * u, bh = 10 * u;
+        float by = py + ph - bh - 4 * u;
+        final Game g = game;
+        if (cb.matchOver) {
+            button(c, w / 2f - bw - 2 * u, by, bw, bh, surv ? "TRY AGAIN" : "PLAY AGAIN", 0xFFC0392B, 4.2f * u, g::startRace);
+        } else {
+            button(c, w / 2f - bw - 2 * u, by, bw, bh, "NEXT ROUND", 0xFF2E9E4F, 4.2f * u, g::nextRound);
+        }
+        button(c, w / 2f + 2 * u, by, bw, bh, "MAIN MENU", 0xFF35506A, 4.2f * u, g::startDemo);
     }
 
     @Override
@@ -742,6 +1211,17 @@ final class HudView extends View {
             case MotionEvent.ACTION_POINTER_DOWN: {
                 float x = e.getX(idx), y = e.getY(idx);
                 int id = e.getPointerId(idx);
+                if (combatControls && sticksActive()) {
+                    if (hit(x, y, fireX, fireY, fireR)) {
+                        firePointer = id;
+                        game.inFire = true;
+                        break;
+                    }
+                    if (hit(x, y, specX, specY, specR)) {
+                        game.inSpecial = true;
+                        break;
+                    }
+                }
                 if (pressButton(x, y)) break;
                 if (!sticksActive()) break;
                 if (game.dualStick) {
@@ -767,6 +1247,7 @@ final class HudView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP: {
                 int id = e.getPointerId(idx);
+                if (id == firePointer) { firePointer = -1; game.inFire = false; }
                 if (id == left.pointer) left.release();
                 if (id == right.pointer) right.release();
                 break;
@@ -774,6 +1255,8 @@ final class HudView extends View {
             case MotionEvent.ACTION_CANCEL:
                 left.release();
                 right.release();
+                firePointer = -1;
+                game.inFire = false;
                 break;
         }
         pushInput();
@@ -783,8 +1266,14 @@ final class HudView extends View {
     private boolean sticksActive() {
         synchronized (game) {
             return (game.state == Game.State.RACING || game.state == Game.State.COUNTDOWN)
-                    && !game.paused && game.player != null && !game.player.finished;
+                    && !game.paused && game.player != null && !game.player.finished
+                    && !(Game.combatBuild && (game.player.out || game.combat.roundOver));
         }
+    }
+
+    private boolean hit(float x, float y, float cx, float cy, float r) {
+        float dx = x - cx, dy = y - cy;
+        return dx * dx + dy * dy < (r + 2 * u) * (r + 2 * u);
     }
 
     private boolean pressButton(float x, float y) {

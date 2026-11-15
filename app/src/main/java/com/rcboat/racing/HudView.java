@@ -194,7 +194,7 @@ final class HudView extends View {
         modeCard(c, px + 5 * u, cy, cw, ch, "RC BOATS", "1/8 scale racing on the lake",
                 "IMPBA courses, classes and rules", 0xFF2E7D9E, () -> { g.setMode(false); g.menuScreen = Game.MENU_RC; });
         modeCard(c, px + 10 * u + cw, cy, cw, ch, "LIFE SIZE", "Unlimited hydroplanes",
-                "Turbine power, 175+ mph, 2-mile courses", 0xFFB5482A,
+                "Turbine power, ~175 mph, 1.5-2.5 mile courses", 0xFFB5482A,
                 () -> { g.setMode(true); g.menuScreen = Game.MENU_LIFE; });
     }
 

@@ -260,7 +260,9 @@ final class Boat {
         float vs = vx * rx + vz * rz;
 
         float top = maxSpeed * speedMul;
-        float drag = accel / (top * top);
+        // air drag sized so full throttle settles at the rated top speed (for the Unlimited,
+        // after water friction too; the RC hulls keep their tuned feel)
+        float drag = (hull == UNLIMITED ? accel - waterDrag * top : accel) / (top * top);
         throttleNow += (throttle - throttleNow) * Math.min(1f, dt / throttleLag);
         float thr = throttleNow;
         float acc;

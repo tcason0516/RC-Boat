@@ -1061,7 +1061,7 @@ final class Game {
     /** Record key: event, course, laps, class, engine and hull. */
     String recordKey(String kind) {
         String course = kind.equals("speed") ? "s" : trackId + (radiusBuoys && track.oval ? "r" : "")
-                + (track.impba ? "" : "cw");   // the RC layouts now run clockwise: new records
+                + (track.life ? "ccw" : track.impba ? "" : "cw");   // records restart when a course changes direction
         String len = kind.equals("race") ? "|" + (timed() ? "t" : String.valueOf(laps)) : "";
         return kind + "|" + course + len + "|" + raceClass + "|" + power + "|" + hull;
     }

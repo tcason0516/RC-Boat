@@ -98,6 +98,9 @@ final class Combat {
     int weapon = Weapons.MACHINE_GUN;
     boolean autoFire = true;
     boolean pickupsOn = true;
+    /** Weapons: everyone gets the player's weapon and keeps it, or all weapons and switching. */
+    boolean sameWeapons;
+    static final String[] WEAPON_RULES = {"Switch any time", "Same as mine"};
 
     // ---- state ----
     final ArrayList<Shot> shots = new ArrayList<>();
@@ -173,7 +176,7 @@ final class Combat {
             Boat b = new Boat(i, Game.NAMES[i], Game.COLORS[i], me, hull, rnd);
             if (!g.lifeSize) b.setPower(Game.POWER_STATS[2][0], Game.POWER_STATS[2][1], Game.POWER_STATS[2][2]);
             b.autopilot = !me;
-            b.weapon = me ? weapon : dealWeapon(withPlayer ? weapon : -1);
+            b.weapon = me || (withPlayer && sameWeapons) ? weapon : dealWeapon(withPlayer ? weapon : -1);
             b.favorite = b.weapon;
             setSkill(b, withPlayer ? g.difficulty : 1, 0);
             boats[i] = b;
@@ -354,7 +357,7 @@ final class Combat {
             Boat b = new Boat(i, Game.NAMES[i], Game.COLORS[i], false, hull, rnd);
             if (!g.lifeSize) b.setPower(Game.POWER_STATS[2][0], Game.POWER_STATS[2][1], Game.POWER_STATS[2][2]);
             b.autopilot = true;
-            b.weapon = dealWeapon(-1);
+            b.weapon = sameWeapons ? weapon : dealWeapon(-1);
             b.favorite = b.weapon;
             setSkill(b, g.difficulty, wave - 1);
             boats[i] = b;
@@ -770,7 +773,7 @@ final class Combat {
 
     /** Changes to another weapon: the old one keeps its ammunition; a short pause to swap. */
     void switchWeapon(Boat b, int w) {
-        if (b.out || w == b.weapon || w < 0 || w >= Weapons.COUNT) return;
+        if (b.out || w == b.weapon || w < 0 || w >= Weapons.COUNT || (sameWeapons && !demo)) return;
         b.ammoOf[b.weapon] = b.reload > 0 ? Math.min(b.ammo, 0f) : b.ammo;
         b.weapon = w;
         b.ammo = b.ammoOf[w];
@@ -1564,6 +1567,7 @@ final class Combat {
 
     /** AI: every few seconds, picks the weapon that suits the distance and the situation. */
     private void aiWeapon(Boat b, float dt) {
+        if (sameWeapons && !demo) return;
         b.aiSwitch -= dt;
         if (b.aiSwitch > 0 || b.target == null || b.aiMode == AI_PICKUP) return;
         float k = k();

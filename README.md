@@ -23,7 +23,8 @@ racing game.
   computer boats each start with a different one). Change weapon any time in battle with
   the **WEAPON** button: it opens a picker showing each weapon's ammunition. Swapping takes
   about a second, and weapons you aren't using reload in the background. Computer boats
-  swap too, to suit the range and the situation.
+  swap too, to suit the range and the situation. Or set *Weapons* to **Same as mine** in the battle
+  settings: every boat gets your weapon and keeps it all battle.
   Machine Gun (auto-aiming turret), Flamethrower (sets boats on fire), Bow Drill (ram them
   to punch holes, they fill with water and sink), Torpedoes (homing, holes below the
   waterline), Harpoon (spears a boat and tows it), Mine Layer (magnetic mines dropped

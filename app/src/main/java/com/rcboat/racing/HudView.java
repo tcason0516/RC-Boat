@@ -814,7 +814,8 @@ final class HudView extends View {
         textC(c, g.lifeSize ? "LIFE SIZE COMBAT" : "RC BOAT COMBAT", w / 2f, py + 9 * u, 6.5f * u, Color.WHITE);
         backButton(c, px, py);
         boolean surv = cb.mode == Combat.MODE_SURVIVAL;
-        String l1 = Weapons.NAMES[cb.weapon] + ": " + Weapons.INFO[cb.weapon];
+        String l1 = (cb.sameWeapons ? "Everyone has the " : "") + Weapons.NAMES[cb.weapon] + ": " + Weapons.INFO[cb.weapon]
+                + (cb.sameWeapons ? "" : "  \u2022  switch weapons in battle");
         String l2;
         if (surv) {
             Float best = g.records.get(cb.survivalKey());
@@ -855,21 +856,23 @@ final class HudView extends View {
         row(c, x0, y0 + 6 * rowH, colW, rowH, "Crates", cb.pickupsOn ? "On" : "Off",
                 () -> cb.pickupsOn = !cb.pickupsOn, () -> cb.pickupsOn = !cb.pickupsOn);
 
-        row(c, x1, y0, colW, rowH, "Weapon", Weapons.NAMES[cb.weapon],
+        row(c, x1, y0, colW, rowH, cb.sameWeapons ? "Weapon" : "Start weapon", Weapons.NAMES[cb.weapon],
                 () -> cb.weapon = (cb.weapon + nW - 1) % nW, () -> cb.weapon = (cb.weapon + 1) % nW);
-        if (g.lifeSize) row(c, x1, y0 + rowH, colW, rowH, "Boat", "Unlimited", () -> { }, () -> { });
-        else row(c, x1, y0 + rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
+        row(c, x1, y0 + rowH, colW, rowH, "Weapons", Combat.WEAPON_RULES[cb.sameWeapons ? 1 : 0],
+                () -> cb.sameWeapons = !cb.sameWeapons, () -> cb.sameWeapons = !cb.sameWeapons);
+        if (g.lifeSize) row(c, x1, y0 + 2 * rowH, colW, rowH, "Boat", "Unlimited", () -> { }, () -> { });
+        else row(c, x1, y0 + 2 * rowH, colW, rowH, "Boat", Boat.HULL_NAMES[g.hull],
                 () -> g.hull = (g.hull + nH - 1) % nH, () -> g.hull = (g.hull + 1) % nH);
-        row(c, x1, y0 + 2 * rowH, colW, rowH, "Auto fire", cb.autoFire ? "On" : "Off",
-                () -> cb.autoFire = !cb.autoFire, () -> cb.autoFire = !cb.autoFire);
         String camName = g.view == Game.VIEW_FPV ? (g.lifeSize ? "Cockpit" : "Boat (FPV)")
                 : g.view == Game.VIEW_CHASE ? "Chase" : "Shore";
-        row(c, x1, y0 + 3 * rowH, colW, rowH, "Camera", camName,
+        row(c, x1, y0 + 3 * rowH, colW, rowH, "Auto fire", cb.autoFire ? "On" : "Off",
+                () -> cb.autoFire = !cb.autoFire, () -> cb.autoFire = !cb.autoFire);
+        row(c, x1, y0 + 4 * rowH, colW, rowH, "Camera", camName,
                 () -> g.view = cycleView(g, -1), () -> g.view = cycleView(g, 1));
-        row(c, x1, y0 + 4 * rowH, colW, rowH, "Controls", Game.CONTROL_NAMES[g.controls],
+        row(c, x1, y0 + 5 * rowH, colW, rowH, "Controls", Game.CONTROL_NAMES[g.controls],
                 () -> g.controls = g.nextControls(-1), () -> g.controls = g.nextControls(1));
         String snd = !g.soundOn ? "Off" : g.announcerOn ? "On" : "No voice";
-        row(c, x1, y0 + 5 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
+        row(c, x1, y0 + 6 * rowH, colW, rowH, "Sound", snd, () -> cycleSound(g, -1), () -> cycleSound(g, 1));
 
         float bw = 56 * u, bh = 10 * u;
         button(c, (w - bw) / 2f, py + ph - bh - 2.5f * u, bw, bh, "START BATTLE", 0xFFC0392B, 5.2f * u,
@@ -1159,7 +1162,8 @@ final class HudView extends View {
         c.drawCircle(specX, specY, specR, stroke);
         textC(c, has ? Weapons.PU_SHORT[p.special] : "SPECIAL", specX, specY + 1f * u, has ? 2.9f * u : 2.4f * u,
                 has ? Color.WHITE : 0x99FFFFFF);
-        // WEAPON: opens the weapon picker
+        // WEAPON: opens the weapon picker (not when everyone keeps the same weapon)
+        if (game.combat.sameWeapons) { weaponMenu = false; return; }
         fill.setColor(weaponMenu ? 0xEE546E7A : 0xAA37474F);
         c.drawCircle(weapX, weapY, weapR, fill);
         c.drawCircle(weapX, weapY, weapR, stroke);
@@ -1284,7 +1288,7 @@ final class HudView extends View {
                         game.inSpecial = true;
                         break;
                     }
-                    if (hit(x, y, weapX, weapY, weapR)) {
+                    if (!game.combat.sameWeapons && hit(x, y, weapX, weapY, weapR)) {
                         weaponMenu = !weaponMenu;
                         invalidate();
                         break;

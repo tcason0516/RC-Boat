@@ -58,6 +58,8 @@ as you steer) or the **chase** camera. Each settings menu has a Back button.
 
 - **Two sticks (default):** left stick = throttle (up forward, down reverse/brake),
   right stick = steering. **One stick:** up/down for throttle, left/right to steer.
+  **Tilt to steer:** left stick = throttle; steer by turning the phone like a steering
+  wheel (full lock at about 28 degrees). Choose under *Controls* in the settings menu.
 - Stay between the **red** and **yellow** buoys. If you leave the course for too long
   you are put back on it.
 - Tap the view button at the top (**SHORE / BOAT / CHASE**) to switch camera any time:

@@ -174,6 +174,7 @@ final class Combat {
             if (!g.lifeSize) b.setPower(Game.POWER_STATS[2][0], Game.POWER_STATS[2][1], Game.POWER_STATS[2][2]);
             b.autopilot = !me;
             b.weapon = me ? weapon : dealWeapon(withPlayer ? weapon : -1);
+            b.favorite = b.weapon;
             setSkill(b, withPlayer ? g.difficulty : 1, 0);
             boats[i] = b;
         }
@@ -292,8 +293,12 @@ final class Combat {
         b.burn = 0;
         b.shield = b.nitro = b.emp = b.oiled = b.power = b.smokeT = 0;
         b.special = -1;
+        b.weapon = b.favorite;
+        for (int w = 0; w < Weapons.COUNT; w++) b.ammoOf[w] = Weapons.MAG[w];
         b.ammo = Weapons.MAG[b.weapon];
         b.reload = 0;
+        b.switchT = 0;
+        b.aiSwitch = 3f + rnd.nextFloat() * 4f;
         b.cool = 0;
         b.out = false;
         b.sinkT = 0;
@@ -350,6 +355,7 @@ final class Combat {
             if (!g.lifeSize) b.setPower(Game.POWER_STATS[2][0], Game.POWER_STATS[2][1], Game.POWER_STATS[2][2]);
             b.autopilot = true;
             b.weapon = dealWeapon(-1);
+            b.favorite = b.weapon;
             setSkill(b, g.difficulty, wave - 1);
             boats[i] = b;
         }
@@ -367,6 +373,7 @@ final class Combat {
         me.holes = Math.max(0, me.holes - 1);
         me.water = Math.max(0f, me.water - 0.3f);
         me.burn = 0;
+        for (int w = 0; w < Weapons.COUNT; w++) me.ammoOf[w] = Weapons.MAG[w];
         me.ammo = Weapons.MAG[me.weapon];
         me.reload = 0;
         float mx = me.x, mz = me.z, mh = me.heading;
@@ -407,6 +414,10 @@ final class Combat {
                 if (g.inSpecial) {
                     b.useSpecial = true;
                     g.inSpecial = false;
+                }
+                if (g.inWeapon >= 0) {
+                    switchWeapon(b, g.inWeapon);
+                    g.inWeapon = -1;
                 }
             } else {
                 think(b, dt);
@@ -478,6 +489,11 @@ final class Combat {
         b.oiled = Math.max(0f, b.oiled - dt);
         b.power = Math.max(0f, b.power - dt);
         b.cool = Math.max(0f, b.cool - dt);
+        b.switchT = Math.max(0f, b.switchT - dt);
+        // weapons not in use reload in the background
+        for (int w = 0; w < Weapons.COUNT; w++)
+            if (w != b.weapon && b.ammoOf[w] < Weapons.MAG[w] && Weapons.RELOAD[w] > 0)
+                b.ammoOf[w] = Math.min(Weapons.MAG[w], b.ammoOf[w] + dt * Weapons.MAG[w] / (Weapons.RELOAD[w] * 1.5f));
         if (b.reload > 0) {
             b.reload -= dt;
             if (b.reload <= 0) { b.reload = 0; b.ammo = Weapons.MAG[b.weapon]; }
@@ -611,7 +627,7 @@ final class Combat {
         if (continuous && !b.fire && b.reload <= 0)
             b.ammo = Math.min(Weapons.MAG[w], b.ammo + dt * Weapons.MAG[w] / Weapons.RELOAD[w] * 0.6f);
         if (w == Weapons.DRILL) return;   // the drill works on contact (see rams)
-        if (!b.fire || b.reload > 0 || b.cool > 0) return;
+        if (!b.fire || b.reload > 0 || b.cool > 0 || b.switchT > 0) return;
         float dir = b.heading + b.aimYaw;
         float fxd = (float) -Math.sin(dir), fzd = (float) -Math.cos(dir);
         float mx = b.x + b.fwdX() * 0.35f * k, mz = b.z + b.fwdZ() * 0.35f * k, my = b.y + 0.32f * k;
@@ -748,6 +764,23 @@ final class Combat {
                 break;
             }
         }
+    }
+
+    static final float SWITCH_TIME = 0.9f;
+
+    /** Changes to another weapon: the old one keeps its ammunition; a short pause to swap. */
+    void switchWeapon(Boat b, int w) {
+        if (b.out || w == b.weapon || w < 0 || w >= Weapons.COUNT) return;
+        b.ammoOf[b.weapon] = b.reload > 0 ? Math.min(b.ammo, 0f) : b.ammo;
+        b.weapon = w;
+        b.ammo = b.ammoOf[w];
+        b.reload = b.ammo <= 0 && Weapons.RELOAD[w] > 0 ? Weapons.RELOAD[w] * 0.7f : 0f;
+        b.switchT = SWITCH_TIME;
+        b.aimYaw = 0;
+        b.aimAt = null;
+        if (w != Weapons.HARPOON) b.tether = null;
+        sfx(S_CLANG, b, 0.5f);
+        if (b.isPlayer) g.setMessage(Weapons.NAMES[w].toUpperCase(), 1.0f);
     }
 
     private void useAmmo(Boat b, float n) {
@@ -1030,7 +1063,7 @@ final class Combat {
     }
 
     private void drill(Boat a, Boat c, float nx, float nz, int i, int j) {
-        if (a.weapon != Weapons.DRILL || !a.fire || a.emp > 0) return;
+        if (a.weapon != Weapons.DRILL || !a.fire || a.emp > 0 || a.switchT > 0) return;
         // c must be in front of a's bow
         float fwd = nx * a.fwdX() + nz * a.fwdZ();
         if (fwd < 0.6f) return;
@@ -1474,6 +1507,7 @@ final class Combat {
             b.aiTimer = 0.25f + rnd.nextFloat() * 0.2f;
             chooseTarget(b);
             aiSpecial(b);
+            aiWeapon(b, 0.25f);
             if (rnd.nextFloat() < 0.04f) b.aiOrbit = -b.aiOrbit;
         }
         Boat t = b.target;
@@ -1523,6 +1557,38 @@ final class Combat {
     }
 
     private Crate[] pickTarget = new Crate[8];
+
+    /** The range (RC metres) each weapon fights best at: min, max. */
+    private static final float[][] BEST_RANGE = {{5f, 20f}, {0f, 6.5f}, {0f, 4f}, {11f, 28f}, {5f, 16f},
+            {0f, 11f}, {3f, 12f}, {9f, 28f}};
+
+    /** AI: every few seconds, picks the weapon that suits the distance and the situation. */
+    private void aiWeapon(Boat b, float dt) {
+        b.aiSwitch -= dt;
+        if (b.aiSwitch > 0 || b.target == null || b.aiMode == AI_PICKUP) return;
+        float k = k();
+        Boat t = b.target;
+        float d = dist(b, t) / k;
+        float bx = t.x - b.x, bz = t.z - b.z;
+        boolean behind = (bx * b.fwdX() + bz * b.fwdZ()) < -0.4f * d * k;
+        int best = b.weapon;
+        float bestScore = -99f, cur = 0f;
+        for (int w = 0; w < Weapons.COUNT; w++) {
+            float sc = 0f;
+            if (d >= BEST_RANGE[w][0] && d <= BEST_RANGE[w][1]) sc += 1f;
+            else sc -= Math.min(1f, Math.min(Math.abs(d - BEST_RANGE[w][0]), Math.abs(d - BEST_RANGE[w][1])) / 10f);
+            if (w == b.favorite) sc += 0.6f;
+            float ammo = w == b.weapon ? (b.reload > 0 ? 0f : b.ammo) : b.ammoOf[w];
+            if (Weapons.MAG[w] > 0) sc += ammo / Weapons.MAG[w] * 0.5f - (ammo <= 0 ? 0.8f : 0f);
+            if (w == Weapons.MINES && behind) sc += 0.7f;
+            if (w == Weapons.DRILL && b.nitro > 0) sc += 0.8f;
+            sc += rnd.nextFloat() * 0.25f;
+            if (w == b.weapon) cur = sc;
+            if (sc > bestScore) { bestScore = sc; best = w; }
+        }
+        b.aiSwitch = 4f + rnd.nextFloat() * 4f;
+        if (best != b.weapon && bestScore > cur + 0.45f) switchWeapon(b, best);
+    }
 
     private void chooseTarget(Boat b) {
         float k = k();

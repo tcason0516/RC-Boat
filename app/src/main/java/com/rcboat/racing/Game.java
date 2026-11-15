@@ -146,6 +146,8 @@ final class Game {
     volatile float inThrottle, inSteer;
     /** Combat: the FIRE button is held / SPECIAL was tapped. */
     volatile boolean inFire, inSpecial;
+    /** Combat: the weapon the player picked from the WEAPON menu (-1 = none). */
+    volatile int inWeapon = -1;
     /** Combat: where each boat is on screen (x, y as 0..1, and depth; -1 off screen), from the renderer. */
     float[] screenXY = new float[COLORS.length * 3];
 

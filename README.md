@@ -19,7 +19,11 @@ that release. New builds install over the old one.
 your boat and battle on the lake until one boat is left afloat. It installs alongside the
 racing game.
 
-- **Weapons** (pick one; the computer boats each get a different one):
+- **Weapons** (every boat carries all eight; you pick the one you start with, and the
+  computer boats each start with a different one). Change weapon any time in battle with
+  the **WEAPON** button: it opens a picker showing each weapon's ammunition. Swapping takes
+  about a second, and weapons you aren't using reload in the background. Computer boats
+  swap too, to suit the range and the situation.
   Machine Gun (auto-aiming turret), Flamethrower (sets boats on fire), Bow Drill (ram them
   to punch holes, they fill with water and sink), Torpedoes (homing, holes below the
   waterline), Harpoon (spears a boat and tows it), Mine Layer (magnetic mines dropped
@@ -32,7 +36,7 @@ racing game.
   Nitro, Shield, EMP Blast, Oil Slick (set it alight with fire or a blast) and Smoke
   Screen are kept for the **SPECIAL** button.
 - **Controls:** the same sticks as the racing game, plus **FIRE** (auto fire is on by
-  default) and **SPECIAL**. Turrets aim themselves at the nearest boat in their arc.
+  default), **SPECIAL** and **WEAPON**. Turrets aim themselves at the nearest boat in their arc.
 - **Longer games:** best of 3 or 5 rounds, a *Battle length* setting (Quick, Normal,
   Epic) that makes hulls tougher, Survival mode (wave after wave of tougher boats, with
   your best wave saved), and Sudden Death leaks so every round ends. When you're out you

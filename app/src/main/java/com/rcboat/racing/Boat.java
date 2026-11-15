@@ -129,6 +129,11 @@ final class Boat {
     float shield, nitro, emp, oiled, power, smokeT;   // effect timers (s)
     int special = -1;          // pickup held for the SPECIAL button (Weapons.PU_*), -1 none
     float ammo, reload, cool;  // magazine, reload timer, time to the next shot
+    /** Ammunition kept for the weapons not in use (every boat carries all of them). */
+    final float[] ammoOf = new float[Weapons.COUNT];
+    int favorite;              // the weapon this boat started with (the AI likes it best)
+    float switchT;             // changing weapons: can't fire until this runs out
+    float aiSwitch;            // AI: time before it thinks about changing weapons again
     boolean out;               // eliminated this round
     float sinkT;               // time since going down (sinking animation)
     float sinkY, sinkPitch, sinkRoll;

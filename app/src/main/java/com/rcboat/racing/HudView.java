@@ -64,7 +64,8 @@ final class HudView extends View {
     // combat: sound effects, and the FIRE / SPECIAL buttons (FIRE is held down)
     private final Sfx sfx;
     private int firePointer = -1;
-    private float fireX, fireY, fireR, specX, specY, specR;
+    private float fireX, fireY, fireR, specX, specY, specR, weapX, weapY, weapR;
+    private boolean weaponMenu;
     private boolean combatControls;
 
     HudView(Context ctx, Game game) {
@@ -936,6 +937,7 @@ final class HudView extends View {
             drawCombatButtons(c, p);
         } else {
             releaseSticks();
+            weaponMenu = false;
         }
 
         // ---- overlays ----
@@ -975,7 +977,7 @@ final class HudView extends View {
         // weapon
         float am = p.reload > 0 ? 1f - p.reload / Math.max(0.01f, Weapons.RELOAD[p.weapon])
                 : p.ammo / Weapons.MAG[p.weapon];
-        String wn = Weapons.SHORT[p.weapon] + (p.reload > 0 ? "  \u2022  RELOADING" : "");
+        String wn = Weapons.SHORT[p.weapon] + (p.switchT > 0 ? "  \u2022  SWITCHING" : p.reload > 0 ? "  \u2022  RELOADING" : "");
         if (p.weapon == Weapons.DRILL) { am = 1f; wn = "DRILL  \u2022  RAM THEM"; }
         label(c, wn, bx, y + 21.8f * u);
         bar(c, bx, y + 23f * u, bw, bhh, am, p.reload > 0 ? 0xFF8D6E63 : 0xFFFFA726);
@@ -1106,6 +1108,14 @@ final class HudView extends View {
         }
         specX = fireX - fireR - specR - 4 * u;
         specY = fireY + 4 * u;
+        weapR = 7f * u;
+        weapX = fireX;
+        weapY = fireY + fireR + weapR + 3 * u;
+        if (game.dualStick || weapY + weapR > getHeight() - u) {
+            // beside the SPECIAL button when there's no room underneath
+            weapX = specX - specR - weapR - 3 * u;
+            weapY = specY;
+        }
     }
 
     private void drawCombatButtons(Canvas c, Boat p) {
@@ -1124,6 +1134,34 @@ final class HudView extends View {
         c.drawCircle(specX, specY, specR, stroke);
         textC(c, has ? Weapons.PU_SHORT[p.special] : "SPECIAL", specX, specY + 1f * u, has ? 2.9f * u : 2.4f * u,
                 has ? Color.WHITE : 0x99FFFFFF);
+        // WEAPON: opens the weapon picker
+        fill.setColor(weaponMenu ? 0xEE546E7A : 0xAA37474F);
+        c.drawCircle(weapX, weapY, weapR, fill);
+        c.drawCircle(weapX, weapY, weapR, stroke);
+        textC(c, Weapons.SHORT[p.weapon], weapX, weapY + 0.2f * u, 2.5f * u, Color.WHITE);
+        textC(c, "WEAPON", weapX, weapY + 3.4f * u, 1.9f * u, 0xCCFFFFFF);
+        if (weaponMenu) weaponPicker(c, p);
+    }
+
+    /** Eight weapon buttons (two rows) above the fire controls, each with its ammunition. */
+    private void weaponPicker(Canvas c, Boat p) {
+        float bw = 17 * u, bh = 9.5f * u, gap = 1.5f * u;
+        float x0 = getWidth() - 2 * u - 4 * bw - 3 * gap;
+        float y0 = Math.max(24 * u, Math.min(fireY, specY) - fireR - 2 * bh - gap - 6 * u);
+        panel(c, x0 - 1.5f * u, y0 - 1.5f * u, 4 * bw + 3 * gap + 3 * u, 2 * bh + gap + 3 * u);
+        for (int w = 0; w < Weapons.COUNT; w++) {
+            float x = x0 + (w % 4) * (bw + gap), y = y0 + (w / 4) * (bh + gap);
+            final int pick = w;
+            boolean cur = w == p.weapon;
+            button(c, x, y, bw, bh, "", cur ? 0xFFB71C1C : 0xFF35506A, 3f * u, () -> {
+                game.inWeapon = pick;
+                weaponMenu = false;
+            });
+            textC(c, Weapons.SHORT[w], x + bw / 2f, y + bh * 0.48f, 2.8f * u, Color.WHITE);
+            float am = cur ? (p.reload > 0 ? 0f : p.ammo) : p.ammoOf[w];
+            float f = w == Weapons.DRILL ? 1f : am / Weapons.MAG[w];
+            bar(c, x + 1.5f * u, y + bh - 2.6f * u, bw - 3 * u, 1.2f * u, f, f > 0.99f ? 0xFF66BB6A : 0xFFFFA726);
+        }
     }
 
     /** End of a round, a match or a survival run. */
@@ -1219,6 +1257,11 @@ final class HudView extends View {
                     }
                     if (hit(x, y, specX, specY, specR)) {
                         game.inSpecial = true;
+                        break;
+                    }
+                    if (hit(x, y, weapX, weapY, weapR)) {
+                        weaponMenu = !weaponMenu;
+                        invalidate();
                         break;
                     }
                 }

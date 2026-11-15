@@ -67,6 +67,7 @@ final class Boat {
     boolean finished;
     float finishTime;
     float offCourseTime;
+    float offDist;             // distance covered since leaving the course
     float wrongWayTime;
     float lastAlong;
 
@@ -170,6 +171,7 @@ final class Boat {
         throttle = steer = 0;
         throttleNow = 0;
         offCourseTime = 0;
+        offDist = 0;
         wrongWayTime = 0;
         stuckTimer = 0;
     }

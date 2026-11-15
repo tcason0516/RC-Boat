@@ -739,6 +739,30 @@ final class Game {
     private void updateProgress(Boat b, float dt, boolean demo) {
         int idx = track.nearest(b.x, b.z, b.trackIdx, 24);
         float dist = track.distTo(idx, b.x, b.z);
+        if (dist >= track.offCourse && b.offCourseTime > 0) {
+            // back on the course somewhere further along (or behind) the point where the boat
+            // left it: look wider. Rejoining counts unless it skipped more course than the
+            // boat covered while it was off (a shortcut), which still gets the reset.
+            // the course point nearest (along the course) to where the boat left it, so a
+            // neighbouring stretch of the course is not mistaken for the one it rejoined
+            int wide = -1;
+            float on = track.offCourse * 0.8f;
+            for (int k = 0; k <= Track.N / 4 && wide < 0; k++) {
+                int f = track.wrap(b.trackIdx + k), r = track.wrap(b.trackIdx - k);
+                if (track.distTo(f, b.x, b.z) < on) wide = f;
+                else if (track.distTo(r, b.x, b.z) < on) wide = r;
+            }
+            if (wide >= 0) wide = track.nearest(b.x, b.z, wide, 24);
+            if (wide >= 0 && track.distTo(wide, b.x, b.z) < track.offCourse) {
+                int jump = wide - b.trackIdx;
+                if (jump < -Track.N / 2) jump += Track.N;
+                else if (jump > Track.N / 2) jump -= Track.N;
+                if (jump * track.ds <= b.offDist * 1.35f + 8f * track.scaleK) {
+                    idx = wide;
+                    dist = track.distTo(idx, b.x, b.z);
+                }
+            }
+        }
         if (dist < track.offCourse) {
             int diff = idx - b.trackIdx;
             if (diff < -Track.N / 2) {
@@ -748,8 +772,10 @@ final class Game {
             if (track.impba && state == State.RACING && !demo && !b.finished) checkCuts(b, b.trackIdx, idx);
             b.trackIdx = idx;
             b.offCourseTime = 0;
+            b.offDist = 0;
         } else {
             b.offCourseTime += dt;
+            b.offDist += b.speed() * dt;
         }
         float along = Boat.clamp(track.along(b.trackIdx, b.x, b.z), -track.ds, track.ds);
         b.progress = b.lapWrap * track.length + track.cum[b.trackIdx] + along;

@@ -29,7 +29,7 @@ final class Weapons {
     /** Turret traverse each side of the bow (rad); 0 = fixed, fires straight ahead. */
     static final float[] ARC = {1.15f, 0.25f, 0f, 0.9f, 0.7f, 0f, 1.0f, 0.35f};
     /** Range (m, RC scale). */
-    static final float[] RANGE = {24f, 7.5f, 2.2f, 30f, 20f, 14f, 13f, 30f};
+    static final float[] RANGE = {24f, 7.5f, 2.2f, 30f, 20f, 14f, 15f, 30f};
     /** Magazine size (shots, or seconds of fuel/water for the flamethrower and cannon). */
     static final float[] MAG = {60f, 4.5f, 1f, 2f, 1f, 5f, 5f, 8f};
     /** Reload time for a full magazine (s). */

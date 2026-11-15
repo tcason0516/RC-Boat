@@ -204,14 +204,15 @@ final class CombatArt {
         boolean rear = weapon == Weapons.MINES;
         if (hull == Boat.UNLIMITED) {
             // on the right sponson's deck, clear of the driver's view; mines at the transom
-            if (rear) return new float[]{0f, 0.72f, 4.45f, 4.5f};
-            if (weapon == Weapons.DRILL) return new float[]{0f, 0.55f, -4.6f, 5.5f};
-            return new float[]{1.6f, 0.86f, -3.1f, 4.2f};
+            if (rear) return new float[]{0f, 0.72f, 4.45f, 6f};
+            if (weapon == Weapons.DRILL) return new float[]{0f, 0.55f, -4.5f, 7f};
+            return new float[]{1.6f, 0.86f, -3.1f, 6f};
         }
         float[] fy = {0.21f, 0.17f, 0.21f, 0.23f}, ry = {0.26f, 0.17f, 0.2f, 0.3f};
         int h = Math.max(0, Math.min(3, hull));
-        if (rear) return new float[]{0f, ry[h], 0.47f, 1f};
-        if (weapon == Weapons.DRILL) return new float[]{0f, fy[h] - 0.08f, -0.62f, 1f};
-        return new float[]{0f, fy[h], -0.34f, 1f};
+        // drawn a size up from true scale so they read clearly from the chase camera
+        if (rear) return new float[]{0f, ry[h], 0.47f, 1.5f};
+        if (weapon == Weapons.DRILL) return new float[]{0f, fy[h] - 0.08f, -0.6f, 1.4f};
+        return new float[]{0f, fy[h], -0.34f, 1.6f};
     }
 }

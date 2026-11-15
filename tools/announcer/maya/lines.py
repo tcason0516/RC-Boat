@@ -111,5 +111,40 @@ for i, n in OPP.items():
 LINES["lead_any"] = LEAD_ANY
 LINES["lead_5_soda"] = "You're getting beat by a boat named after a soda!"
 
+# RC Boat Combat (the second app)
+COMBAT = {
+    "cstart_0": X + "Welcome to the battle on the lake! Last boat floating wins!",
+    "cstart_1": X + "Weapons hot, engines loud! Let's get ready to rumble!",
+    "cstart_2": "Lock and load, captains! Only one of you is going home dry!",
+    "cstart_3": "Today's forecast: cloudy, with a high chance of torpedoes!",
+    "cstart_4": "Please keep your hands and feet inside the boat at all times!",
+    "cgo_0": X + "Fight!",
+    "cgo_1": X + "Open fire!",
+    "cgo_2": X + "Let 'em have it!",
+    "ckill_0": X + "Boat down!",
+    "ckill_1": X + "That one's headed for the bottom!",
+    "ckill_2": "Ooh, somebody's calling their insurance company!",
+    "ckill_3": X + "Another one bites the bubbles!",
+    "ckill_4": "That boat is now a submarine!",
+    "cyoukill_0": X + "You got him! Direct hit!",
+    "cyoukill_1": X + "Great shot! He's going down!",
+    "cyoukill_2": X + "Sunk him! Say hello to Davy Jones!",
+    "cyoukill_3": "You sent him swimming!",
+    "cyoukill_4": X + "Boom! That's how it's done!",
+    "cyouout_0": "Ohh, you're going down!",
+    "cyouout_1": "Abandon ship! You're out!",
+    "cyouout_2": "Well, at least the fish have a new home.",
+    "cwin_0": X + "Last boat floating! You win!",
+    "cwin_1": X + "Victory! You're the captain of the lake!",
+    "cwin_2": X + "You win! Somebody get this captain a medal!",
+    "cwave_0": X + "Here comes another wave!",
+    "cwave_1": X + "More boats incoming! Stay sharp!",
+    "cwave_2": "They're sending in reinforcements!",
+    "cclear_0": X + "Wave cleared! Nice shooting!",
+    "cclear_1": X + "That's the whole wave! Catch your breath!",
+    "cclear_2": "Wave cleared! Don't get comfy, there's more coming!",
+}
+LINES.update(COMBAT)
+
 if __name__ == "__main__":
     print(len(LINES), "lines")

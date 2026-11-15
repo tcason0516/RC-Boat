@@ -20,11 +20,11 @@ final class Combat {
     static final int MODE_LAST = 0, MODE_SURVIVAL = 1;
     static final String[] MODE_NAMES = {"Last one standing", "Survival waves"};
     static final String[] LENGTH_NAMES = {"Quick", "Normal", "Epic"};
-    static final float[] LENGTH_HP = {0.8f, 1.5f, 2.6f};
+    static final float[] LENGTH_HP = {1f, 2f, 3.5f};
     /** Crates turn up more often in longer battles. */
     static final float[] LENGTH_CRATES = {1.2f, 1f, 0.75f};
     /** After this long, every boat springs a leak (Sudden Death), so rounds always end. */
-    static final float[] LENGTH_SUDDEN = {150f, 270f, 480f};
+    static final float[] LENGTH_SUDDEN = {150f, 300f, 540f};
     static final int[] ROUNDS = {1, 3, 5};
     static final String[] RC_ARENAS = {"Island Lake", "Open Lake", "Buoy Maze"};
     static final String[] LIFE_ARENAS = {"Big Lake", "Buoy Maze"};
@@ -180,7 +180,17 @@ final class Combat {
         g.boats = boats;
         g.order = boats.clone();
         g.player = withPlayer ? boats[0] : null;
+        standDrivers();
         buildArena();
+    }
+
+    /** RC: the drivers stand in a row on the platform; the shore camera is the player's spot. */
+    private void standDrivers() {
+        int n = g.boats.length;
+        for (int i = 0; i < Game.COLORS.length; i++) g.driverX[i] = (i - (n - 1) / 2f) * Game.DRIVER_SPACING;
+        g.shoreEye[0] = g.driverX[0];
+        g.shoreEye[1] = g.deckY + Game.EYE_HEIGHT;
+        g.shoreEye[2] = g.driverZ;
     }
 
     private void setSkill(Boat b, int difficulty, int waveBoost) {
@@ -262,6 +272,7 @@ final class Combat {
         for (int i = 0; i < n; i++) {
             Boat b = boats[i];
             resetBoat(b);
+            if (mode == MODE_SURVIVAL && !demo && !b.isPlayer) waveToughness(b);
             placeOnRing(b, a0 + 6.283f * i / n, 0.62f);
         }
         alive = n;
@@ -320,6 +331,13 @@ final class Combat {
         b.heading += (rnd.nextFloat() - 0.5f) * 0.4f;
     }
 
+    /** Survival: the first waves are softer targets; from wave 5 they get tougher. */
+    private void waveToughness(Boat b) {
+        float k = Math.min(1.6f, 0.55f + (wave - 1) * 0.12f);
+        b.maxHp *= k;
+        b.hp = b.maxHp;
+    }
+
     private void spawnWave() {
         // survival: the player plus a wave of computer boats, one more each wave (up to 5)
         Boat me = g.player;
@@ -337,6 +355,7 @@ final class Combat {
         }
         g.boats = boats;
         g.order = boats.clone();
+        standDrivers();
     }
 
     /** Survival: the next wave arrives at the edge of the arena; the player keeps fighting. */
@@ -359,9 +378,7 @@ final class Combat {
         for (int i = 1; i < g.boats.length; i++) {
             Boat b = g.boats[i];
             resetBoat(b);
-            float hpk = 1f + (wave - 1) * 0.08f;
-            b.maxHp *= hpk;
-            b.hp = b.maxHp;
+            waveToughness(b);
             placeOnRing(b, far + (i - (g.boats.length) / 2f) * 0.5f, 0.85f);
         }
         me.x = mx; me.z = mz; me.heading = mh; me.vx = mvx; me.vz = mvz;
@@ -688,12 +705,12 @@ final class Combat {
                     float sp = (19f + rnd.nextFloat() * 4f) * k;
                     float d2 = dir + (rnd.nextFloat() - 0.5f) * 0.07f;
                     g.spray.emit(mx, my, mz, (float) -Math.sin(d2) * sp + b.vx, (1.6f + rnd.nextFloat()) * k,
-                            (float) -Math.cos(d2) * sp + b.vz, 0.9f, 0.05f * k, 0.32f * k, 0.85f);
+                            (float) -Math.cos(d2) * sp + b.vz, 0.9f, 0.03f * k, 0.17f * k, 0.7f);
                 }
                 for (Boat o : g.boats) {
                     if (o == b || o.out) continue;
                     float range = Weapons.RANGE[w] * k;
-                    if (inCone(b, o, dir, range, 0.2f)) {
+                    if (inCone(b, o, dir, range, 0.28f)) {
                         float d = dist(b, o);
                         float f = 1f - d / range * 0.6f;
                         float push = Weapons.CANNON_PUSH * k * dt * f;
@@ -932,8 +949,8 @@ final class Combat {
             fx.emit(x, 0.3f * k, z, (float) Math.cos(a) * sp, (1f + rnd.nextFloat() * 3f) * k, (float) Math.sin(a) * sp,
                     0.35f + rnd.nextFloat() * 0.3f, 0.3f * k * n, 1.2f * k * n, 1f, 0.7f, 0.25f, 1f, 1f * k, true);
             fx.emit(x, 0.5f * k, z, (float) Math.cos(a) * sp * 0.5f, (0.5f + rnd.nextFloat()) * k,
-                    (float) Math.sin(a) * sp * 0.5f, 2.2f + rnd.nextFloat(), 0.4f * k * n, 2.2f * k * n,
-                    0.13f, 0.12f, 0.11f, 0.55f, 0.5f * k, false);
+                    (float) Math.sin(a) * sp * 0.5f, 2.2f + rnd.nextFloat(), 0.3f * k * n, 1.6f * k * n,
+                    0.16f, 0.15f, 0.14f, 0.4f, 0.5f * k, false);
         }
         fx.emit(x, 0.4f * k, z, 0, 0, 0, 0.18f, 1.5f * k * n, 3f * k * n, 1f, 0.95f, 0.8f, 1f, 0f, true);
         g.particles.emit(x, z, 0, 0, 2.5f, 0.5f * k * n, 3.5f * k * n, 0.8f);
@@ -991,7 +1008,7 @@ final class Combat {
                     float dmg = closing / k * 1.4f;
                     // whoever was driving into the other takes less
                     Boat hitter = va > -vc ? a : c, hit = hitter == a ? c : a;
-                    float bonus = hitter.nitro > 0 ? 2f : 1f;
+                    float bonus = (hitter.nitro > 0 ? 2f : 1f) * (hitter.weapon == Weapons.DRILL ? 1.8f : 1f);
                     damage(hit, dmg * bonus, hitter, "rammed");
                     damage(hitter, dmg * 0.35f, hit, "rammed");
                     sparks((a.x + c.x) / 2f, a.y + 0.2f * k, (a.z + c.z) / 2f, 8);
@@ -1018,7 +1035,7 @@ final class Combat {
         float fwd = nx * a.fwdX() + nz * a.fwdZ();
         if (fwd < 0.6f) return;
         if (a.cool > 0) return;
-        a.cool = 0.6f;
+        a.cool = 0.45f;
         float pw = a.power > 0 ? 2f : 1f;
         damage(c, Weapons.DRILL_DMG * pw, a, "drilled");
         hole(c, a);
@@ -1368,7 +1385,7 @@ final class Combat {
                     waveBreak = 4f;
                     addFeed("WAVE " + wave + " CLEARED!");
                     g.setMessage("WAVE " + wave + " CLEARED", 2f);
-                    say("cwin", 3, Announcer.IMPORTANT);
+                    say("cclear", 3, Announcer.IMPORTANT);
                 }
                 waveBreak -= dt;
                 if (waveBreak <= 0) nextWave();
@@ -1430,9 +1447,18 @@ final class Combat {
     /** Fast-forwards the rest of the round once the player is out. */
     void skipRound() {
         int guard = 0;
-        while (!roundOver && guard++ < 30 * 400) g.combatStep(1f / 30f);
+        skipping = true;
+        try {
+            while (!roundOver && guard++ < 30 * 400) g.combatStep(1f / 30f);
+        } finally {
+            skipping = false;
+        }
         fx.clear();
+        g.particles.clear();
+        g.spray.clear();
     }
+
+    private boolean skipping;
 
     void nextRound() {
         if (matchOver) return;
@@ -1669,7 +1695,7 @@ final class Combat {
     }
 
     void sfxAt(int id, float x, float z, float vol) {
-        if (demo) return;
+        if (demo || skipping) return;
         // fainter with distance from the player (or the camera's boat)
         Boat me = g.viewBoat();
         float k = k();
@@ -1688,7 +1714,7 @@ final class Combat {
     }
 
     private void say(String base, int variants, int level) {
-        if (demo) return;
+        if (demo || skipping) return;
         g.announcer.enabled = g.announcerOn && g.soundOn;
         g.announcer.say(base, variants, base, 0f, level);
     }
